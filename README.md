@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # datbdd
 
 A new Flutter project.
@@ -14,3 +15,6 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+=======
+# laptrinhthietbididong
+>>>>>>> 83b7bd58079f166f695f9b6955d3349983fea845
