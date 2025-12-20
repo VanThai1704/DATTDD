@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart' as scheduler;
 import 'package:table_calendar/table_calendar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -178,8 +177,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void initState() {
     super.initState();
-    // Load dữ liệu ngay lập tức - chỉ đợi frame đầu tiên để đảm bảo widget đã mounted
-    scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+    // Load dữ liệu ngay lập tức - dùng microtask để đảm bảo widget đã mounted
+    Future.microtask(() {
       if (!_isDisposed && mounted) {
         _setupFirestoreListeners();
       }
