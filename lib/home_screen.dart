@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' as scheduler;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
 
@@ -6,12 +8,14 @@ import 'package:intl/intl.dart';
 class Event {
   final String title;
   final String time;
+  final DateTime? date;
   final IconData icon;
   final Color color;
 
   Event({
     required this.title,
     required this.time,
+    this.date,
     required this.icon,
     required this.color,
   });
@@ -40,11 +44,23 @@ class _HomeScreenState extends State<HomeScreen> {
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
   int _notificationId = 0;
+  Timer? _notificationTimer;
+  // Set để lưu các event đã gửi thông báo sắp tới (tránh trùng lặp)
+  final Set<String> _notifiedEvents = {};
+  // Set để lưu các event đã gửi thông báo đến giờ (tránh trùng lặp)
+  final Set<String> _notifiedStartEvents = {};
 
   @override
   void initState() {
     super.initState();
     _initializeNotifications();
+    _startNotificationChecker();
+  }
+
+  @override
+  void dispose() {
+    _notificationTimer?.cancel();
+    super.dispose();
   }
 
   // Khởi tạo notification
@@ -73,6 +89,80 @@ class _HomeScreenState extends State<HomeScreen> {
             AndroidFlutterLocalNotificationsPlugin>();
     if (androidPlugin != null) {
       await androidPlugin.requestNotificationsPermission();
+    }
+  }
+
+  // Bắt đầu kiểm tra thông báo định kỳ
+  void _startNotificationChecker() {
+    // Kiểm tra mỗi phút
+    _notificationTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+      _checkUpcomingEvents();
+    });
+    // Kiểm tra ngay lập tức
+    _checkUpcomingEvents();
+  }
+
+  // Kiểm tra các sự kiện sắp tới và gửi thông báo
+  void _checkUpcomingEvents() {
+    final now = DateTime.now();
+    
+    for (int i = 0; i < _events.length; i++) {
+      final event = _events[i];
+      if (event.date == null) continue;
+      
+      // Parse giờ bắt đầu từ event.time
+      final startTime = _parseTimeFromString(event.time);
+      if (startTime == null) continue;
+      
+      // Tạo DateTime cho thời điểm bắt đầu sự kiện
+      final eventDateTime = DateTime(
+        event.date!.year,
+        event.date!.month,
+        event.date!.day,
+        startTime.hour,
+        startTime.minute,
+      );
+      
+      // Tính khoảng cách thời gian
+      final difference = eventDateTime.difference(now);
+      final minutesUntilEvent = difference.inMinutes;
+      final secondsUntilEvent = difference.inSeconds;
+      
+      // Tạo key duy nhất cho event (để tránh thông báo trùng lặp)
+      final eventKey = '${event.title}_${eventDateTime.millisecondsSinceEpoch}';
+      final startEventKey = '${eventKey}_start';
+      
+      // Kiểm tra nếu còn dưới 15 phút và chưa gửi thông báo sắp tới
+      if (minutesUntilEvent > 0 && 
+          minutesUntilEvent <= 15 && 
+          !_notifiedEvents.contains(eventKey)) {
+        // Gửi thông báo sắp tới
+        _showNotification(
+          'Sự kiện sắp tới',
+          '${event.title} sẽ bắt đầu trong ${minutesUntilEvent} phút',
+        );
+        // Đánh dấu đã gửi thông báo sắp tới
+        _notifiedEvents.add(eventKey);
+      }
+      
+      // Kiểm tra nếu đã đến giờ (trong vòng 1 phút đầu) và chưa gửi thông báo đến giờ
+      if (minutesUntilEvent == 0 && 
+          secondsUntilEvent >= 0 && 
+          !_notifiedStartEvents.contains(startEventKey)) {
+        // Gửi thông báo đến giờ
+        _showNotification(
+          'Sự kiện đã bắt đầu',
+          '${event.title} đã bắt đầu lúc ${_formatTimeOfDay(startTime)}',
+        );
+        // Đánh dấu đã gửi thông báo đến giờ
+        _notifiedStartEvents.add(startEventKey);
+      }
+      
+      // Xóa các event đã qua khỏi set (dọn dẹp)
+      if (minutesUntilEvent < -1) {
+        _notifiedEvents.remove(eventKey);
+        _notifiedStartEvents.remove(startEventKey);
+      }
     }
   }
 
@@ -107,25 +197,658 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Danh sách events và tasks (lưu trong memory)
-  final List<Event> _events = [
+  List<Event> _events = [
     Event(
       title: 'Họp nhóm',
       time: '10:00 AM - 11:00 AM',
+      date: DateTime.now(),
       icon: Icons.group,
       color: Colors.orange,
     ),
     Event(
       title: 'Làm bài tập lớn',
       time: '2:00 PM - 4:00 PM',
+      date: DateTime.now(),
       icon: Icons.assignment,
       color: Colors.blue,
     ),
   ];
 
-  final List<Task> _tasks = [
+  List<Task> _tasks = [
     Task(title: 'Nộp báo cáo', deadline: 'Hạn chót: Ngày mai'),
     Task(title: 'Kiểm tra giữa kỳ', deadline: 'Hạn chót: 25/05/2024'),
   ];
+
+  // Hàm xóa Event
+  void _deleteEvent(int index) {
+    setState(() {
+      _events.removeAt(index);
+    });
+    _showNotification('Đã xóa', 'Sự kiện đã được xóa');
+  }
+
+  // Hàm xóa Task
+  void _deleteTask(int index) {
+    setState(() {
+      _tasks.removeAt(index);
+    });
+    _showNotification('Đã xóa', 'Nhiệm vụ đã được xóa');
+  }
+
+  // Dialog xác nhận xóa Event
+  void _showDeleteEventDialog(BuildContext context, int index) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Xác nhận xóa'),
+          content: Text('Bạn có chắc chắn muốn xóa sự kiện "${_events[index].title}"?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                _deleteEvent(index);
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Xóa'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Dialog xác nhận xóa Task
+  void _showDeleteTaskDialog(BuildContext context, int index) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Xác nhận xóa'),
+          content: Text('Bạn có chắc chắn muốn xóa nhiệm vụ "${_tasks[index].title}"?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                _deleteTask(index);
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Xóa'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Dialog hiển thị chi tiết Event
+  void _showEventDetailsDialog(BuildContext context, Event event) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: event.color,
+                child: Icon(event.icon, color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  event.title,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Divider(),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.access_time, size: 20, color: Colors.grey),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Thời gian:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.only(left: 28.0),
+                  child: Text(
+                    event.time,
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    const Icon(Icons.palette, size: 20, color: Colors.grey),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Màu sắc:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.only(left: 28.0),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: event.color,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.grey, width: 1),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Đóng'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Hàm parse thời gian từ string (VD: "10:00 AM - 11:00 AM")
+  TimeOfDay? _parseTimeFromString(String timeString) {
+    try {
+      // Tách phần đầu tiên (giờ bắt đầu)
+      final parts = timeString.split(' - ');
+      if (parts.isEmpty) return null;
+      final startTimeStr = parts[0].trim();
+      // Parse format "10:00 AM" hoặc "10:00AM"
+      final timeMatch = RegExp(r'(\d{1,2}):(\d{2})\s*(AM|PM)', caseSensitive: false).firstMatch(startTimeStr);
+      if (timeMatch == null) return null;
+      int hour = int.parse(timeMatch.group(1)!);
+      int minute = int.parse(timeMatch.group(2)!);
+      final period = timeMatch.group(3)!.toUpperCase();
+      if (period == 'PM' && hour != 12) hour += 12;
+      if (period == 'AM' && hour == 12) hour = 0;
+      return TimeOfDay(hour: hour, minute: minute);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Dialog chỉnh sửa Event
+  void _showEditEventDialog(BuildContext context, int index) {
+    final event = _events[index];
+    final titleController = TextEditingController(text: event.title);
+    DateTime? selectedDate = event.date ?? DateTime.now();
+    // Parse thời gian từ string
+    TimeOfDay? startTime = _parseTimeFromString(event.time);
+    TimeOfDay? endTime;
+    if (event.time.contains(' - ')) {
+      final parts = event.time.split(' - ');
+      if (parts.length > 1) {
+        endTime = _parseTimeFromString(parts[1]);
+      }
+    }
+    // Nếu không parse được, dùng giá trị mặc định
+    startTime ??= TimeOfDay.now();
+    endTime ??= TimeOfDay(hour: TimeOfDay.now().hour + 1, minute: TimeOfDay.now().minute);
+    IconData selectedIcon = event.icon;
+    Color selectedColor = event.color;
+    // Lưu context của widget chính
+    final scaffoldContext = this.context;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PopScope(
+              canPop: true,
+              onPopInvoked: (didPop) {
+                if (didPop) {
+                  titleController.dispose();
+                }
+              },
+              child: AlertDialog(
+                title: const Text('Chỉnh sửa Sự kiện'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: titleController,
+                        decoration: const InputDecoration(
+                          labelText: 'Tên sự kiện',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ListTile(
+                        leading: const Icon(Icons.calendar_today),
+                        title: const Text('Chọn ngày'),
+                        subtitle: Text(
+                          selectedDate == null
+                              ? 'Chưa chọn ngày'
+                              : _formatDate(selectedDate!),
+                        ),
+                        onTap: () async {
+                          final DateTime now = DateTime.now();
+                          final DateTime? picked = await showDatePicker(
+                            context: context,
+                            initialDate: selectedDate ?? now,
+                            firstDate: DateTime(now.year - 1),
+                            lastDate: DateTime(now.year + 5),
+                          );
+                          if (picked != null) {
+                            setDialogState(() {
+                              selectedDate = picked;
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      ListTile(
+                        leading: const Icon(Icons.access_time),
+                        title: const Text('Giờ bắt đầu'),
+                        subtitle: Text(
+                          startTime == null
+                              ? 'Chưa chọn giờ'
+                              : _formatTimeOfDay(startTime!),
+                        ),
+                        onTap: () async {
+                          final TimeOfDay? picked = await showTimePicker(
+                            context: context,
+                            initialTime: startTime ?? TimeOfDay.now(),
+                          );
+                          if (picked != null) {
+                            setDialogState(() {
+                              startTime = picked;
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      ListTile(
+                        leading: const Icon(Icons.access_time),
+                        title: const Text('Giờ kết thúc'),
+                        subtitle: Text(
+                          endTime == null
+                              ? 'Chưa chọn giờ'
+                              : _formatTimeOfDay(endTime!),
+                        ),
+                        onTap: () async {
+                          final TimeOfDay? picked = await showTimePicker(
+                            context: context,
+                            initialTime: endTime ?? startTime ?? TimeOfDay.now(),
+                          );
+                          if (picked != null) {
+                            setDialogState(() {
+                              endTime = picked;
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      const Text('Icon:'),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          Icons.event,
+                          Icons.group,
+                          Icons.assignment,
+                          Icons.school,
+                          Icons.work,
+                        ].map((icon) {
+                          return GestureDetector(
+                            onTap: () {
+                              setDialogState(() {
+                                selectedIcon = icon;
+                              });
+                            },
+                            child: Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: selectedIcon == icon
+                                    ? Colors.blue.withOpacity(0.2)
+                                    : Colors.grey.withOpacity(0.1),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: selectedIcon == icon
+                                      ? Colors.blue
+                                      : Colors.grey.withOpacity(0.3),
+                                  width: selectedIcon == icon ? 2 : 1,
+                                ),
+                              ),
+                              child: Icon(
+                                icon,
+                                color: selectedIcon == icon
+                                    ? Colors.blue
+                                    : Colors.grey[700],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text('Màu:'),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          Colors.blue, Colors.orange, Colors.green, Colors.purple, Colors.red, Colors.teal,
+                        ].map((color) {
+                          return GestureDetector(
+                            onTap: () {
+                              setDialogState(() {
+                                selectedColor = color;
+                              });
+                            },
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: color,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: selectedColor == color ? Colors.black : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                    },
+                    child: const Text('Hủy'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      final title = titleController.text.trim();
+                      if (title.isEmpty) {
+                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Vui lòng nhập tên sự kiện'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      if (selectedDate == null) {
+                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Vui lòng chọn ngày'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      if (startTime == null) {
+                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Vui lòng chọn giờ bắt đầu'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      if (endTime == null) {
+                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Vui lòng chọn giờ kết thúc'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      // Kiểm tra giờ kết thúc phải sau giờ bắt đầu
+                      final startMinutes = startTime!.hour * 60 + startTime!.minute;
+                      final endMinutes = endTime!.hour * 60 + endTime!.minute;
+                      if (endMinutes <= startMinutes) {
+                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Giờ kết thúc phải sau giờ bắt đầu'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      // Lưu giá trị trước khi đóng dialog
+                      final updatedEvent = Event(
+                        title: title,
+                        time: '${_formatTimeOfDay(startTime!)} - ${_formatTimeOfDay(endTime!)}',
+                        date: selectedDate,
+                        icon: selectedIcon,
+                        color: selectedColor,
+                      );
+                      final eventIndex = index;
+                      // Đóng dialog trước
+                      Navigator.pop(dialogContext);
+                      // Cập nhật state sau khi dialog đóng
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) {
+                          setState(() {
+                            _events[eventIndex] = updatedEvent;
+                          });
+                          _showNotification('Đã cập nhật', 'Sự kiện đã được chỉnh sửa');
+                        }
+                      });
+                    },
+                    child: const Text('Lưu'),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // Dialog chỉnh sửa Task
+  void _showEditTaskDialog(BuildContext context, int index) {
+    final task = _tasks[index];
+    final titleController = TextEditingController(text: task.title);
+    // Parse deadline để lấy ngày (bỏ phần "Hạn chót: ")
+    final deadlineText = task.deadline.replaceFirst('Hạn chót: ', '');
+    final deadlineController = TextEditingController(text: deadlineText);
+    // Lưu context của widget chính
+    final scaffoldContext = this.context;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return PopScope(
+          canPop: true,
+          onPopInvoked: (didPop) {
+            if (didPop) {
+              titleController.dispose();
+              deadlineController.dispose();
+            }
+          },
+          child: AlertDialog(
+            title: const Text('Chỉnh sửa Nhiệm vụ'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Tên nhiệm vụ',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: deadlineController,
+                    decoration: const InputDecoration(
+                      labelText: 'Hạn chót (VD: 25/05/2024)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text('Hủy'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  final title = titleController.text.trim();
+                  final deadline = deadlineController.text.trim();
+                  if (title.isEmpty) {
+                    ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                      const SnackBar(
+                        content: Text('Vui lòng nhập tên nhiệm vụ'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+                  if (deadline.isEmpty) {
+                    ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                      const SnackBar(
+                        content: Text('Vui lòng nhập hạn chót'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+                  // Lưu giá trị trước khi đóng dialog
+                  final updatedTask = Task(
+                    title: title,
+                    deadline: 'Hạn chót: $deadline',
+                  );
+                  final taskIndex = index;
+                  // Đóng dialog trước
+                  Navigator.pop(dialogContext);
+                  // Cập nhật state sau khi dialog đóng
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      setState(() {
+                        _tasks[taskIndex] = updatedTask;
+                      });
+                      _showNotification('Đã cập nhật', 'Nhiệm vụ đã được chỉnh sửa');
+                    }
+                  });
+                },
+                child: const Text('Lưu'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Dialog hiển thị chi tiết Task
+  void _showTaskDetailsDialog(BuildContext context, Task task) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.task_alt, color: Colors.green, size: 28),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  task.title,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Divider(),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.calendar_today, size: 20, color: Colors.grey),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Hạn chót:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.only(left: 28.0),
+                  child: Text(
+                    task.deadline,
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Đóng'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   // Mở dialog để chọn loại (Event hoặc Task)
   void _showAddDialog(BuildContext context) {
@@ -180,14 +903,23 @@ class _HomeScreenState extends State<HomeScreen> {
     TimeOfDay? endTime;
     IconData selectedIcon = Icons.event;
     Color selectedColor = Colors.blue;
+    // Lưu context của widget chính
+    final scaffoldContext = this.context;
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            return AlertDialog(
+            return PopScope(
+              canPop: true,
+              onPopInvoked: (didPop) {
+                if (didPop) {
+                  titleController.dispose();
+                }
+              },
+              child: AlertDialog(
               title: const Text('Thêm Sự kiện'),
               content: SingleChildScrollView(
                 child: Column(
@@ -268,28 +1000,48 @@ class _HomeScreenState extends State<HomeScreen> {
                       },
                     ),
                     const SizedBox(height: 16),
-                    Row(
+                    const Text('Icon:'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        const Text('Icon: '),
-                        const SizedBox(width: 8),
-                        DropdownButton<IconData>(
-                          value: selectedIcon,
-                          items: const [
-                            DropdownMenuItem(value: Icons.event, child: Icon(Icons.event)),
-                            DropdownMenuItem(value: Icons.group, child: Icon(Icons.group)),
-                            DropdownMenuItem(value: Icons.assignment, child: Icon(Icons.assignment)),
-                            DropdownMenuItem(value: Icons.school, child: Icon(Icons.school)),
-                            DropdownMenuItem(value: Icons.work, child: Icon(Icons.work)),
-                          ],
-                          onChanged: (IconData? value) {
-                            if (value != null) {
-                              setDialogState(() {
-                                selectedIcon = value;
-                              });
-                            }
+                        Icons.event,
+                        Icons.group,
+                        Icons.assignment,
+                        Icons.school,
+                        Icons.work,
+                      ].map((icon) {
+                        return GestureDetector(
+                          onTap: () {
+                            setDialogState(() {
+                              selectedIcon = icon;
+                            });
                           },
-                        ),
-                      ],
+                          child: Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: selectedIcon == icon
+                                  ? Colors.blue.withOpacity(0.2)
+                                  : Colors.grey.withOpacity(0.1),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: selectedIcon == icon
+                                    ? Colors.blue
+                                    : Colors.grey.withOpacity(0.3),
+                                width: selectedIcon == icon ? 2 : 1,
+                              ),
+                            ),
+                            child: Icon(
+                              icon,
+                              color: selectedIcon == icon
+                                  ? Colors.blue
+                                  : Colors.grey[700],
+                            ),
+                          ),
+                        );
+                      }).toList(),
                     ),
                     const SizedBox(height: 16),
                     const Text('Màu:'),
@@ -326,29 +1078,87 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                  },
                   child: const Text('Hủy'),
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    final title = titleController.text;
-                    if (title.isNotEmpty && startTime != null && endTime != null) {
-                      final newEvent = Event(
-                        title: title,
-                        time: '${_formatTimeOfDay(startTime!)} - ${_formatTimeOfDay(endTime!)}',
-                        icon: selectedIcon,
-                        color: selectedColor,
+                    final title = titleController.text.trim();
+                    if (title.isEmpty) {
+                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('Vui lòng nhập tên sự kiện'),
+                          backgroundColor: Colors.red,
+                        ),
                       );
-                      setState(() {
-                        _events.add(newEvent);
-                      });
-                      _showNotification('Sự kiện mới', 'Đã thêm: $title');
-                      Navigator.pop(context);
+                      return;
                     }
+                    if (selectedDate == null) {
+                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('Vui lòng chọn ngày'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+                    if (startTime == null) {
+                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('Vui lòng chọn giờ bắt đầu'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+                    if (endTime == null) {
+                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('Vui lòng chọn giờ kết thúc'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+                    // Kiểm tra giờ kết thúc phải sau giờ bắt đầu
+                    final startMinutes = startTime!.hour * 60 + startTime!.minute;
+                    final endMinutes = endTime!.hour * 60 + endTime!.minute;
+                    if (endMinutes <= startMinutes) {
+                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('Giờ kết thúc phải sau giờ bắt đầu'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+                    final newEvent = Event(
+                      title: title,
+                      time: '${_formatTimeOfDay(startTime!)} - ${_formatTimeOfDay(endTime!)}',
+                      date: selectedDate,
+                      icon: selectedIcon,
+                      color: selectedColor,
+                    );
+                    // Lưu title để hiển thị thông báo sau
+                    final eventTitle = title;
+                    // Đóng dialog trước (controller sẽ được dispose trong PopScope.onPopInvoked)
+                    Navigator.pop(dialogContext);
+                    // Cập nhật state sau khi dialog đóng
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) {
+                        setState(() {
+                          _events.add(newEvent);
+                        });
+                        _showNotification('Sự kiện mới', 'Đã thêm: $eventTitle');
+                      }
+                    });
                   },
                   child: const Text('Thêm'),
                 ),
               ],
+            ),
             );
           },
         );
@@ -360,14 +1170,23 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showAddTaskDialog(BuildContext context) {
     final titleController = TextEditingController();
     DateTime? selectedDate;
+    // Lưu context của widget chính
+    final scaffoldContext = this.context;
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            return AlertDialog(
+            return PopScope(
+              canPop: true,
+              onPopInvoked: (didPop) {
+                if (didPop) {
+                  titleController.dispose();
+                }
+              },
+              child: AlertDialog(
               title: const Text('Thêm Nhiệm vụ'),
               content: SingleChildScrollView(
                 child: Column(
@@ -409,27 +1228,54 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                  },
                   child: const Text('Hủy'),
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    final title = titleController.text;
-                    if (title.isNotEmpty && selectedDate != null) {
-                      final newTask = Task(
-                        title: title,
-                        deadline: 'Hạn chót: ${_formatDate(selectedDate!)}',
+                    final title = titleController.text.trim();
+                    if (title.isEmpty) {
+                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('Vui lòng nhập tên nhiệm vụ'),
+                          backgroundColor: Colors.red,
+                        ),
                       );
-                      setState(() {
-                        _tasks.add(newTask);
-                      });
-                      _showNotification('Nhiệm vụ mới', 'Đã thêm: $title');
-                      Navigator.pop(context);
+                      return;
                     }
+                    if (selectedDate == null) {
+                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        const SnackBar(
+                          content: Text('Vui lòng chọn hạn chót'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+                    final newTask = Task(
+                      title: title,
+                      deadline: 'Hạn chót: ${_formatDate(selectedDate!)}',
+                    );
+                    // Lưu title để hiển thị thông báo sau
+                    final taskTitle = title;
+                    // Đóng dialog trước (controller sẽ được dispose trong PopScope.onPopInvoked)
+                    Navigator.pop(dialogContext);
+                    // Cập nhật state sau khi dialog đóng
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) {
+                        setState(() {
+                          _tasks.add(newTask);
+                        });
+                        _showNotification('Nhiệm vụ mới', 'Đã thêm: $taskTitle');
+                      }
+                    });
                   },
                   child: const Text('Thêm'),
                 ),
               ],
+            ),
             );
           },
         );
@@ -463,7 +1309,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _events.length,
                     itemBuilder: (context, index) {
-                      return _buildTodayEvent(context, _events[index]);
+                      return _buildTodayEvent(context, _events[index], index);
                     },
                   ),
             const SizedBox(height: 24.0),
@@ -482,7 +1328,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _tasks.length,
                     itemBuilder: (context, index) {
-                      return _buildUpcomingTask(context, _tasks[index]);
+                      return _buildUpcomingTask(context, _tasks[index], index);
                     },
                   ),
           ],
@@ -496,7 +1342,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildTodayEvent(BuildContext context, Event event) {
+  Widget _buildTodayEvent(BuildContext context, Event event, int index) {
     return Card(
       elevation: 2.0,
       margin: const EdgeInsets.symmetric(vertical: 8.0),
@@ -509,11 +1355,32 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Text(event.title,
             style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text(event.time),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.info_outline, color: Colors.blue),
+              onPressed: () => _showEventDetailsDialog(context, event),
+              tooltip: 'Xem chi tiết',
+            ),
+            IconButton(
+              icon: const Icon(Icons.edit, color: Colors.orange),
+              onPressed: () => _showEditEventDialog(context, index),
+              tooltip: 'Chỉnh sửa',
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: () => _showDeleteEventDialog(context, index),
+              tooltip: 'Xóa sự kiện',
+            ),
+          ],
+        ),
+        onTap: () => _showEventDetailsDialog(context, event),
       ),
     );
   }
 
-  Widget _buildUpcomingTask(BuildContext context, Task task) {
+  Widget _buildUpcomingTask(BuildContext context, Task task, int index) {
     return Card(
       elevation: 2.0,
       margin: const EdgeInsets.symmetric(vertical: 8.0),
@@ -523,10 +1390,27 @@ class _HomeScreenState extends State<HomeScreen> {
         title:
             Text(task.title, style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text(task.deadline),
-        trailing: const Icon(Icons.arrow_forward_ios),
-        onTap: () {
-          // Xử lý khi nhấn vào task
-        },
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.info_outline, color: Colors.blue),
+              onPressed: () => _showTaskDetailsDialog(context, task),
+              tooltip: 'Xem chi tiết',
+            ),
+            IconButton(
+              icon: const Icon(Icons.edit, color: Colors.orange),
+              onPressed: () => _showEditTaskDialog(context, index),
+              tooltip: 'Chỉnh sửa',
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: () => _showDeleteTaskDialog(context, index),
+              tooltip: 'Xóa nhiệm vụ',
+            ),
+          ],
+        ),
+        onTap: () => _showTaskDetailsDialog(context, task),
       ),
     );
   }
