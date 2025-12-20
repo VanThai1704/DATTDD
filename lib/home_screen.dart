@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' as scheduler;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -97,10 +98,16 @@ class _HomeScreenState extends State<HomeScreen> {
       FlutterLocalNotificationsPlugin();
   int _notificationId = 0;
   Timer? _notificationTimer;
-  // Set để lưu các event đã gửi thông báo sắp tới (tránh trùng lặp)
-  final Set<String> _notifiedEvents = {};
-  // Set để lưu các event đã gửi thông báo đến giờ (tránh trùng lặp)
-  final Set<String> _notifiedStartEvents = {};
+  // Map để lưu thời gian gửi thông báo cuối cùng cho mỗi event
+  // Key format: 'eventKey_notificationType' (ví dụ: 'eventKey_60', 'eventKey_30', 'eventKey_15', 'eventKey_5', 'eventKey_start')
+  // Value: DateTime của lần gửi thông báo cuối cùng
+  final Map<String, DateTime> _lastNotificationTime = {};
+  // Map để lưu thời gian gửi thông báo cuối cùng cho mỗi task
+  final Map<String, DateTime> _lastTaskNotificationTime = {};
+  
+  // Khoảng thời gian giữa các lần gửi thông báo lặp lại (tính bằng phút)
+  // Giảm xuống để gửi liên tục hơn
+  static const int _repeatNotificationInterval = 1; // Gửi lại mỗi 1 phút
 
   // Danh sách events và tasks (lưu trong memory)
   final List<Event> _events = [];
@@ -143,15 +150,10 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _initializeNotifications();
     _startNotificationChecker();
-    // Load dữ liệu và lắng nghe thay đổi từ Firestore
-    // Đợi để đảm bảo Firebase đã sẵn sàng và widget đã mounted
+    // Load dữ liệu ngay lập tức - chỉ đợi frame đầu tiên để đảm bảo widget đã mounted
     scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!_isDisposed && mounted) {
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (!_isDisposed && mounted) {
-            _setupFirestoreListeners();
-          }
-        });
+        _setupFirestoreListeners();
       }
     });
   }
@@ -187,6 +189,7 @@ class _HomeScreenState extends State<HomeScreen> {
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
+      requestCriticalPermission: true, // Yêu cầu quyền critical notification (iOS)
     );
     const initSettings = InitializationSettings(
       android: androidSettings,
@@ -206,22 +209,39 @@ class _HomeScreenState extends State<HomeScreen> {
             AndroidFlutterLocalNotificationsPlugin>();
     if (androidPlugin != null) {
       await androidPlugin.requestNotificationsPermission();
+      // Tạo notification channel với sound và vibration
+      await androidPlugin.createNotificationChannel(
+        AndroidNotificationChannel(
+          'time_management_channel',
+          'Time Management',
+          description: 'Thông báo về thời khóa biểu với chuông báo thức',
+          importance: Importance.max,
+          playSound: true,
+          enableVibration: true,
+          vibrationPattern: Int64List.fromList([0, 500, 200, 500, 200, 500]),
+        ),
+      );
     }
   }
 
   // Bắt đầu kiểm tra thông báo định kỳ
   void _startNotificationChecker() {
-    // Kiểm tra mỗi phút
-    _notificationTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+    debugPrint('🚀 Bắt đầu kiểm tra thông báo định kỳ');
+    // Kiểm tra mỗi 10 giây để thông báo liên tục và chính xác hơn
+    _notificationTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       if (!_isDisposed && mounted) {
         _checkUpcomingEvents();
+        _checkUpcomingTasks();
       } else {
+        debugPrint('⚠️ Dừng timer: Widget disposed hoặc không mounted');
         timer.cancel();
       }
     });
     // Kiểm tra ngay lập tức
     if (!_isDisposed && mounted) {
+      debugPrint('🔍 Kiểm tra thông báo ngay lập tức');
       _checkUpcomingEvents();
+      _checkUpcomingTasks();
     }
   }
 
@@ -229,18 +249,31 @@ class _HomeScreenState extends State<HomeScreen> {
   void _checkUpcomingEvents() {
     // Kiểm tra disposed và mounted trước khi xử lý
     if (_isDisposed || !mounted) {
+      debugPrint('⚠️ _checkUpcomingEvents: Widget disposed hoặc không mounted');
       return;
     }
     
     final now = DateTime.now();
+    debugPrint('🔔 Kiểm tra thông báo lúc ${now.hour}:${now.minute}:${now.second} - Có ${_events.length} events');
+    
+    if (_events.isEmpty) {
+      debugPrint('⚠️ Không có events nào để kiểm tra');
+      return;
+    }
     
     for (int i = 0; i < _events.length; i++) {
       final event = _events[i];
-      if (event.date == null) continue;
+      if (event.date == null) {
+        debugPrint('⚠️ Event "${event.title}" không có ngày');
+        continue;
+      }
       
       // Parse giờ bắt đầu từ event.time
       final startTime = _parseTimeFromString(event.time);
-      if (startTime == null) continue;
+      if (startTime == null) {
+        debugPrint('⚠️ Không parse được thời gian cho event "${event.title}": ${event.time}');
+        continue;
+      }
       
       // Tạo DateTime cho thời điểm bắt đầu sự kiện
       final eventDateTime = DateTime(
@@ -256,72 +289,252 @@ class _HomeScreenState extends State<HomeScreen> {
       final minutesUntilEvent = difference.inMinutes;
       final secondsUntilEvent = difference.inSeconds;
       
+      debugPrint('📅 Event: "${event.title}" - Còn $minutesUntilEvent phút (${secondsUntilEvent} giây)');
+      
       // Tạo key duy nhất cho event (để tránh thông báo trùng lặp)
       final eventKey = '${event.title}_${eventDateTime.millisecondsSinceEpoch}';
       final startEventKey = '${eventKey}_start';
       
-      // Kiểm tra nếu còn dưới 15 phút và chưa gửi thông báo sắp tới
-      if (minutesUntilEvent > 0 && 
-          minutesUntilEvent <= 15 && 
-          !_notifiedEvents.contains(eventKey)) {
-        // Gửi thông báo sắp tới
-        _showNotification(
-          'Sự kiện sắp tới',
-          '${event.title} sẽ bắt đầu trong $minutesUntilEvent phút',
-        );
-        // Đánh dấu đã gửi thông báo sắp tới
-        _notifiedEvents.add(eventKey);
+      // Gửi thông báo liên tục khi còn dưới 60 phút
+      if (minutesUntilEvent > 0 && minutesUntilEvent <= 60) {
+        final notificationKey = '${eventKey}_continuous';
+        final lastNotification = _lastNotificationTime[notificationKey];
+        
+        // Gửi lại mỗi 1 phút khi còn dưới 60 phút
+        // Gửi mỗi 30 giây khi còn dưới 10 phút
+        // Gửi mỗi 15 giây khi còn dưới 2 phút
+        int repeatIntervalSeconds;
+        if (minutesUntilEvent <= 2) {
+          repeatIntervalSeconds = 15; // Gửi mỗi 15 giây khi còn dưới 2 phút
+        } else if (minutesUntilEvent <= 10) {
+          repeatIntervalSeconds = 30; // Gửi mỗi 30 giây khi còn dưới 10 phút
+        } else {
+          repeatIntervalSeconds = 60; // Gửi mỗi 1 phút khi còn dưới 60 phút
+        }
+        
+        final shouldSend = lastNotification == null || 
+            now.difference(lastNotification).inSeconds >= repeatIntervalSeconds;
+        
+        if (shouldSend) {
+          String timeText;
+          if (minutesUntilEvent >= 60) {
+            final hours = minutesUntilEvent ~/ 60;
+            timeText = hours == 1 ? '1 giờ' : '$hours giờ';
+          } else if (minutesUntilEvent == 0) {
+            timeText = 'ít hơn 1 phút';
+          } else if (minutesUntilEvent == 1) {
+            timeText = '1 phút';
+          } else {
+            timeText = '$minutesUntilEvent phút';
+          }
+          
+          debugPrint('✅ Gửi thông báo liên tục: "${event.title}" còn $timeText (gửi lại sau $repeatIntervalSeconds giây)');
+          _showNotification(
+            'Sự kiện sắp tới',
+            '${event.title} sẽ bắt đầu trong $timeText',
+          );
+          _lastNotificationTime[notificationKey] = now;
+        }
       }
       
-      // Kiểm tra nếu đã đến giờ (trong vòng 1 phút đầu) và chưa gửi thông báo đến giờ
-      if (minutesUntilEvent == 0 && 
-          secondsUntilEvent >= 0 && 
-          !_notifiedStartEvents.contains(startEventKey)) {
-        // Gửi thông báo đến giờ
-        _showNotification(
-          'Sự kiện đã bắt đầu',
-          '${event.title} đã bắt đầu lúc ${_formatTimeOfDay(startTime)}',
-        );
-        // Đánh dấu đã gửi thông báo đến giờ
-        _notifiedStartEvents.add(startEventKey);
+      // Gửi thông báo liên tục khi đã đến giờ (trong vòng 10 phút đầu)
+      if (minutesUntilEvent == 0 && secondsUntilEvent >= 0 && secondsUntilEvent <= 600) {
+        final notificationKey = startEventKey;
+        final lastNotification = _lastNotificationTime[notificationKey];
+        
+        // Gửi lại mỗi 30 giây khi event đã bắt đầu
+        final shouldSend = lastNotification == null || 
+            now.difference(lastNotification).inSeconds >= 30;
+        
+        if (shouldSend) {
+          debugPrint('✅ Gửi thông báo event đã bắt đầu: "${event.title}"');
+          _showNotification(
+            'Sự kiện đã bắt đầu',
+            '${event.title} đã bắt đầu lúc ${_formatTimeOfDay(startTime)}',
+          );
+          _lastNotificationTime[notificationKey] = now;
+        }
       }
       
-      // Xóa các event đã qua khỏi set (dọn dẹp)
-      if (minutesUntilEvent < -1) {
-        _notifiedEvents.remove(eventKey);
-        _notifiedStartEvents.remove(startEventKey);
+      // Xóa các event đã qua khỏi map (dọn dẹp) - sau 10 phút kể từ khi event bắt đầu
+      if (minutesUntilEvent < -10) {
+        // Xóa tất cả các notification keys liên quan
+        _lastNotificationTime.remove('${eventKey}_continuous');
+        _lastNotificationTime.remove(startEventKey);
       }
     }
   }
 
-  // Gửi thông báo
-  Future<void> _showNotification(String title, String body) async {
-    const androidDetails = AndroidNotificationDetails(
-      'time_management_channel',
-      'Time Management',
-      channelDescription: 'Thông báo về thời khóa biểu',
-      importance: Importance.high,
-      priority: Priority.high,
-      showWhen: true,
-    );
+  // Kiểm tra các task sắp đến deadline và gửi thông báo
+  void _checkUpcomingTasks() {
+    if (_isDisposed || !mounted) {
+      return;
+    }
+    
+    final now = DateTime.now();
+    
+    for (int i = 0; i < _tasks.length; i++) {
+      final task = _tasks[i];
+      
+      // Parse deadline từ task.deadline (format: "Hạn chót: DD/MM/YYYY")
+      final deadlineText = task.deadline.replaceFirst('Hạn chót: ', '').trim();
+      DateTime? deadlineDate;
+      
+      try {
+        // Thử parse format DD/MM/YYYY
+        final parts = deadlineText.split('/');
+        if (parts.length == 3) {
+          final day = int.parse(parts[0]);
+          final month = int.parse(parts[1]);
+          final year = int.parse(parts[2]);
+          deadlineDate = DateTime(year, month, day, 23, 59); // Cuối ngày
+        }
+      } catch (e) {
+        debugPrint('Lỗi khi parse deadline: $e');
+        continue;
+      }
+      
+      if (deadlineDate == null) continue;
+      
+      // Tính khoảng cách thời gian
+      final difference = deadlineDate.difference(now);
+      final daysUntilDeadline = difference.inDays;
+      final hoursUntilDeadline = difference.inHours;
+      
+      // Tạo key duy nhất cho task
+      final taskKey = '${task.title}_${deadlineDate.millisecondsSinceEpoch}';
+      
+      // Gửi thông báo 1 ngày trước deadline và lặp lại
+      if (daysUntilDeadline == 1 && hoursUntilDeadline >= 23 && hoursUntilDeadline <= 24) {
+        final notificationKey = '${taskKey}_1day';
+        final lastNotification = _lastTaskNotificationTime[notificationKey];
+        final shouldSend = lastNotification == null || 
+            now.difference(lastNotification).inHours >= 6; // Gửi lại mỗi 6 giờ
+        
+        if (shouldSend) {
+          _showNotification(
+            'Nhiệm vụ sắp đến hạn',
+            '${task.title} còn 1 ngày nữa đến hạn chót',
+          );
+          _lastTaskNotificationTime[notificationKey] = now;
+        }
+      }
+      
+      // Gửi thông báo khi còn 12 giờ trước deadline và lặp lại
+      if (daysUntilDeadline == 0 && hoursUntilDeadline > 0 && hoursUntilDeadline <= 12) {
+        final notificationKey = '${taskKey}_12hours';
+        final lastNotification = _lastTaskNotificationTime[notificationKey];
+        final shouldSend = lastNotification == null || 
+            now.difference(lastNotification).inHours >= 3; // Gửi lại mỗi 3 giờ
+        
+        if (shouldSend) {
+          String timeText;
+          if (hoursUntilDeadline == 1) {
+            timeText = '1 giờ';
+          } else {
+            timeText = '$hoursUntilDeadline giờ';
+          }
+          
+          _showNotification(
+            'Nhiệm vụ sắp đến hạn',
+            '${task.title} còn $timeText nữa đến hạn chót',
+          );
+          _lastTaskNotificationTime[notificationKey] = now;
+        }
+      }
+      
+      // Gửi thông báo khi đến deadline (trong vòng 24 giờ đầu) và lặp lại
+      if (daysUntilDeadline == 0 && hoursUntilDeadline >= 0 && hoursUntilDeadline <= 24) {
+        final notificationKey = '${taskKey}_deadline';
+        final lastNotification = _lastTaskNotificationTime[notificationKey];
+        final shouldSend = lastNotification == null || 
+            now.difference(lastNotification).inHours >= 2; // Gửi lại mỗi 2 giờ
+        
+        if (shouldSend) {
+          String message;
+          if (hoursUntilDeadline == 0) {
+            message = '${task.title} đã đến hạn chót hôm nay';
+          } else {
+            message = '${task.title} còn $hoursUntilDeadline giờ nữa đến hạn chót';
+          }
+          
+          _showNotification(
+            'Nhiệm vụ đến hạn',
+            message,
+          );
+          _lastTaskNotificationTime[notificationKey] = now;
+        }
+      }
+      
+      // Xóa các task đã qua deadline khỏi map (dọn dẹp)
+      if (daysUntilDeadline < 0 || (daysUntilDeadline == 0 && hoursUntilDeadline < 0)) {
+        _lastTaskNotificationTime.remove('${taskKey}_1day');
+        _lastTaskNotificationTime.remove('${taskKey}_12hours');
+        _lastTaskNotificationTime.remove('${taskKey}_deadline');
+      }
+    }
+  }
 
-    const iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
+  // Gửi thông báo với chuông báo như báo thức
+  Future<void> _showNotification(String title, String body, {bool isAlarm = true}) async {
+    // Kiểm tra disposed trước khi gửi thông báo
+    if (_isDisposed) {
+      debugPrint('⚠️ Không thể gửi thông báo: Widget đã disposed');
+      return;
+    }
+    
+    debugPrint('🔔 Đang gửi thông báo: $title - $body');
+    
+    try {
+      // Android notification với chuông báo thức
+      final androidDetails = AndroidNotificationDetails(
+        'time_management_channel',
+        'Time Management',
+        channelDescription: 'Thông báo về thời khóa biểu',
+        importance: Importance.max, // Tối đa để hiển thị ngay cả khi màn hình tắt
+        priority: Priority.max, // Ưu tiên cao nhất
+        showWhen: true,
+        enableVibration: true,
+        vibrationPattern: isAlarm 
+            ? Int64List.fromList([0, 500, 200, 500, 200, 500]) // Rung mạnh như báo thức
+            : Int64List.fromList([0, 250, 250, 250]), // Rung nhẹ cho thông báo thường
+        playSound: true,
+        // Dùng sound mặc định của hệ thống (notification sound)
+        // Android sẽ tự động dùng sound mặc định khi không chỉ định
+        category: isAlarm 
+            ? AndroidNotificationCategory.alarm // Phân loại là alarm
+            : AndroidNotificationCategory.reminder,
+        fullScreenIntent: isAlarm, // Hiển thị full screen khi màn hình tắt (chỉ cho alarm)
+        autoCancel: false, // Không tự động tắt để người dùng phải chủ động tắt
+        ongoing: isAlarm, // Đánh dấu là ongoing notification (không thể swipe away)
+        styleInformation: BigTextStyleInformation(body), // Hiển thị text lớn
+      );
 
-    const details = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
+      // iOS notification với sound
+      const iosDetails = DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+        sound: 'default', // Dùng sound mặc định của iOS
+        interruptionLevel: InterruptionLevel.critical, // Critical để hiển thị ngay cả khi Do Not Disturb
+      );
 
-    await _notifications.show(
-      _notificationId++,
-      title,
-      body,
-      details,
-    );
+      final details = NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      );
+
+      final notificationId = _notificationId++;
+      await _notifications.show(
+        notificationId,
+        title,
+        body,
+        details,
+      );
+      debugPrint('✅ Đã gửi thông báo thành công (ID: $notificationId)');
+    } catch (e) {
+      debugPrint('❌ Lỗi khi gửi thông báo: $e');
+    }
   }
 
   // Thiết lập listeners cho Firestore để tự động cập nhật khi có thay đổi
@@ -331,9 +544,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // Kiểm tra Firebase đã được khởi tạo chưa
     try {
       if (Firebase.apps.isEmpty) {
-        debugPrint('Firebase chưa được khởi tạo, bỏ qua setup listeners');
-        // Thử lại sau 1 giây
-        Future.delayed(const Duration(seconds: 1), () {
+        debugPrint('Firebase chưa được khởi tạo, thử lại ngay lập tức');
+        // Thử lại ngay lập tức với microtask
+        Future.microtask(() {
           if (!_isDisposed && mounted) {
             _setupFirestoreListeners();
           }
@@ -342,8 +555,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       debugPrint('Lỗi khi kiểm tra Firebase: $e');
-      // Thử lại sau 1 giây nếu có lỗi
-      Future.delayed(const Duration(seconds: 1), () {
+      // Thử lại ngay lập tức với microtask
+      Future.microtask(() {
         if (!_isDisposed && mounted) {
           _setupFirestoreListeners();
         }
@@ -371,23 +584,17 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           }
           
-          // Sử dụng SchedulerBinding thay vì WidgetsBinding để tránh tạo widget dependency
-          // Kiểm tra lại mounted trước khi schedule callback
+          // Cập nhật UI ngay lập tức nếu widget vẫn mounted
           if (!_isDisposed && mounted) {
-            scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
-              // Kiểm tra lại sau postFrameCallback
-              if (!_isDisposed && mounted) {
-                try {
-                  // Sử dụng helper method để gọi setState an toàn
-                  _safeSetState(() {
-                    _events.clear();
-                    _events.addAll(newEvents);
-                  });
-                } catch (e) {
-                  debugPrint('Lỗi khi xử lý events: $e');
-                }
-              }
-            });
+            try {
+              // Sử dụng helper method để gọi setState an toàn
+              _safeSetState(() {
+                _events.clear();
+                _events.addAll(newEvents);
+              });
+            } catch (e) {
+              debugPrint('Lỗi khi xử lý events: $e');
+            }
           }
         },
         onError: (error) {
@@ -415,23 +622,17 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           }
           
-          // Sử dụng SchedulerBinding thay vì WidgetsBinding để tránh tạo widget dependency
-          // Kiểm tra lại mounted trước khi schedule callback
+          // Cập nhật UI ngay lập tức nếu widget vẫn mounted
           if (!_isDisposed && mounted) {
-            scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
-              // Kiểm tra lại sau postFrameCallback
-              if (!_isDisposed && mounted) {
-                try {
-                  // Sử dụng helper method để gọi setState an toàn
-                  _safeSetState(() {
-                    _tasks.clear();
-                    _tasks.addAll(newTasks);
-                  });
-                } catch (e) {
-                  debugPrint('Lỗi khi xử lý tasks: $e');
-                }
-              }
-            });
+            try {
+              // Sử dụng helper method để gọi setState an toàn
+              _safeSetState(() {
+                _tasks.clear();
+                _tasks.addAll(newTasks);
+              });
+            } catch (e) {
+              debugPrint('Lỗi khi xử lý tasks: $e');
+            }
           }
         },
         onError: (error) {
@@ -446,6 +647,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Lưu Event vào Firestore
   Future<void> _saveEvent(Event event) async {
+    // Kiểm tra disposed trước khi lưu
+    if (_isDisposed || !mounted) {
+      return;
+    }
+    
     try {
       final eventData = event.toJson();
       // Chuyển đổi DateTime thành Timestamp cho Firestore
@@ -467,6 +673,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Lưu Task vào Firestore
   Future<void> _saveTask(Task task) async {
+    // Kiểm tra disposed trước khi lưu
+    if (_isDisposed || !mounted) {
+      return;
+    }
+    
     try {
       final taskData = task.toJson();
       
@@ -484,6 +695,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Xóa Event từ Firestore
   Future<void> _deleteEventFromFirestore(String eventId) async {
+    // Kiểm tra disposed trước khi xóa
+    if (_isDisposed || !mounted) {
+      return;
+    }
+    
     try {
       await _firestore.collection('events').doc(eventId).delete();
     } catch (e) {
@@ -493,6 +709,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Xóa Task từ Firestore
   Future<void> _deleteTaskFromFirestore(String taskId) async {
+    // Kiểm tra disposed trước khi xóa
+    if (_isDisposed || !mounted) {
+      return;
+    }
+    
     try {
       await _firestore.collection('tasks').doc(taskId).delete();
     } catch (e) {
@@ -502,20 +723,42 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Hàm xóa Event
   void _deleteEvent(int index) {
+    if (_isDisposed || !mounted || index < 0 || index >= _events.length) {
+      return;
+    }
+    
     final event = _events[index];
     if (event.id != null) {
-      _deleteEventFromFirestore(event.id!);
+      _deleteEventFromFirestore(event.id!).then((_) {
+        if (!_isDisposed && mounted) {
+          _showNotification('Đã xóa', 'Sự kiện đã được xóa');
+        }
+      });
+    } else {
+      if (!_isDisposed && mounted) {
+        _showNotification('Đã xóa', 'Sự kiện đã được xóa');
+      }
     }
-    _showNotification('Đã xóa', 'Sự kiện đã được xóa');
   }
 
   // Hàm xóa Task
   void _deleteTask(int index) {
+    if (_isDisposed || !mounted || index < 0 || index >= _tasks.length) {
+      return;
+    }
+    
     final task = _tasks[index];
     if (task.id != null) {
-      _deleteTaskFromFirestore(task.id!);
+      _deleteTaskFromFirestore(task.id!).then((_) {
+        if (!_isDisposed && mounted) {
+          _showNotification('Đã xóa', 'Nhiệm vụ đã được xóa');
+        }
+      });
+    } else {
+      if (!_isDisposed && mounted) {
+        _showNotification('Đã xóa', 'Nhiệm vụ đã được xóa');
+      }
     }
-    _showNotification('Đã xóa', 'Nhiệm vụ đã được xóa');
   }
 
   // Dialog xác nhận xóa Event
@@ -584,17 +827,26 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: Row(
             children: [
               CircleAvatar(
+                radius: 24,
                 backgroundColor: event.color,
-                child: Icon(event.icon, color: Colors.white, size: 24),
+                child: Icon(event.icon, color: Colors.white, size: 28),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   event.title,
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -605,7 +857,33 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Divider(),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
+                // Ngày
+                if (event.date != null) ...[
+                  Row(
+                    children: [
+                      const Icon(Icons.calendar_today, size: 20, color: Colors.grey),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Ngày:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 28.0),
+                    child: Text(
+                      _formatDate(event.date!),
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                // Thời gian
                 Row(
                   children: [
                     const Icon(Icons.access_time, size: 20, color: Colors.grey),
@@ -628,6 +906,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                // Màu sắc
                 Row(
                   children: [
                     const Icon(Icons.palette, size: 20, color: Colors.grey),
@@ -645,12 +924,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 Padding(
                   padding: const EdgeInsets.only(left: 28.0),
                   child: Container(
-                    width: 40,
-                    height: 40,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: event.color,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.grey, width: 1),
+                      border: Border.all(color: Colors.grey.shade300, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: event.color.withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -660,7 +946,13 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Đóng'),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+              child: const Text(
+                'Đóng',
+                style: TextStyle(fontSize: 16),
+              ),
             ),
           ],
         );
@@ -951,8 +1243,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       // Sử dụng SchedulerBinding để schedule callback an toàn (sau khi dialog đóng)
                       scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
                         if (!_isDisposed && mounted) {
-                          _saveEvent(updatedEvent);
-                          _showNotification('Đã cập nhật', 'Sự kiện đã được chỉnh sửa');
+                          _saveEvent(updatedEvent).then((_) {
+                            if (!_isDisposed && mounted) {
+                              _showNotification('Đã cập nhật', 'Sự kiện đã được chỉnh sửa');
+                            }
+                          });
                         }
                       });
                     },
@@ -1051,8 +1346,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   // Sử dụng SchedulerBinding để schedule callback an toàn (sau khi dialog đóng)
                   scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
                     if (!_isDisposed && mounted) {
-                      _saveTask(updatedTask);
-                      _showNotification('Đã cập nhật', 'Nhiệm vụ đã được chỉnh sửa');
+                      _saveTask(updatedTask).then((_) {
+                        if (!_isDisposed && mounted) {
+                          _showNotification('Đã cập nhật', 'Nhiệm vụ đã được chỉnh sửa');
+                        }
+                      });
                     }
                   });
                 },
@@ -1421,8 +1719,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     // Sử dụng SchedulerBinding để schedule callback an toàn (sau khi dialog đóng)
                     scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
                       if (!_isDisposed && mounted) {
-                        _saveEvent(newEvent);
-                        _showNotification('Sự kiện mới', 'Đã thêm: $eventTitle');
+                        _saveEvent(newEvent).then((_) {
+                          if (!_isDisposed && mounted) {
+                            _showNotification('Sự kiện mới', 'Đã thêm: $eventTitle');
+                          }
+                        });
                       }
                     });
                   },
@@ -1536,8 +1837,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     // Sử dụng SchedulerBinding để schedule callback an toàn (sau khi dialog đóng)
                     scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
                       if (!_isDisposed && mounted) {
-                        _saveTask(newTask);
-                        _showNotification('Nhiệm vụ mới', 'Đã thêm: $taskTitle');
+                        _saveTask(newTask).then((_) {
+                          if (!_isDisposed && mounted) {
+                            _showNotification('Nhiệm vụ mới', 'Đã thêm: $taskTitle');
+                          }
+                        });
                       }
                     });
                   },

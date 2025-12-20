@@ -1,5 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' as scheduler;
 import 'package:table_calendar/table_calendar.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'home_screen.dart'; // Import Event model
 
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
@@ -12,25 +17,39 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   CalendarFormat _calendarFormat = CalendarFormat.month;
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-  final Map<DateTime, List<String>> _events = {
-    DateTime.utc(2024, 5, 20): ['Họp nhóm', 'Làm bài tập lớn'],
-    DateTime.utc(2024, 5, 22): ['Kiểm tra giữa kỳ'],
-  };
+  final Map<DateTime, List<Event>> _events = {}; // Lưu events theo ngày
+  
+  // Firestore instance
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  StreamSubscription<QuerySnapshot>? _eventsSubscription;
+  bool _isDisposed = false;
   
   // Set để lưu các ngày đã được đánh dấu
   final Set<DateTime> _markedDays = {};
 
   // Hàm xóa sự kiện trong lịch
   void _deleteEvent(DateTime day, int index) {
+    if (_isDisposed || !mounted) return;
+    
     final normalizedDay = DateTime.utc(day.year, day.month, day.day);
-    setState(() {
-      if (_events.containsKey(normalizedDay)) {
+    if (_events.containsKey(normalizedDay) && index < _events[normalizedDay]!.length) {
+      final event = _events[normalizedDay]![index];
+      
+      // Xóa từ Firestore nếu có ID
+      if (event.id != null) {
+        _firestore.collection('events').doc(event.id).delete().catchError((e) {
+          debugPrint('Lỗi khi xóa event từ Firestore: $e');
+        });
+      }
+      
+      // Cập nhật UI (sẽ tự động cập nhật khi Firestore listener nhận được thay đổi)
+      setState(() {
         _events[normalizedDay]!.removeAt(index);
         if (_events[normalizedDay]!.isEmpty) {
           _events.remove(normalizedDay);
         }
-      }
-    });
+      });
+    }
   }
 
   // Dialog xác nhận xóa sự kiện trong lịch
@@ -126,10 +145,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  List<String> _getEventsForDay(DateTime day) {
+  List<Event> _getEventsForDay(DateTime day) {
     // Normalize the day to UTC to match the keys in the _events map.
     final normalizedDay = DateTime.utc(day.year, day.month, day.day);
     return _events[normalizedDay] ?? [];
+  }
+  
+  // Lấy danh sách tên events cho ngày (để hiển thị)
+  List<String> _getEventTitlesForDay(DateTime day) {
+    final events = _getEventsForDay(day);
+    return events.map((e) => e.title).toList();
   }
 
   // Kiểm tra ngày có được đánh dấu không
@@ -151,8 +176,100 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    // Load dữ liệu ngay lập tức - chỉ đợi frame đầu tiên để đảm bảo widget đã mounted
+    scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!_isDisposed && mounted) {
+        _setupFirestoreListeners();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    _eventsSubscription?.cancel();
+    _eventsSubscription = null;
+    super.dispose();
+  }
+
+  // Thiết lập listeners cho Firestore
+  void _setupFirestoreListeners() {
+    if (_isDisposed || !mounted) return;
+    
+    try {
+      if (Firebase.apps.isEmpty) {
+        debugPrint('Firebase chưa được khởi tạo, thử lại ngay lập tức');
+        // Thử lại ngay lập tức với microtask
+        Future.microtask(() {
+          if (!_isDisposed && mounted) {
+            _setupFirestoreListeners();
+          }
+        });
+        return;
+      }
+    } catch (e) {
+      debugPrint('Lỗi khi kiểm tra Firebase: $e');
+      // Thử lại ngay lập tức với microtask
+      Future.microtask(() {
+        if (!_isDisposed && mounted) {
+          _setupFirestoreListeners();
+        }
+      });
+      return;
+    }
+    
+    try {
+      _eventsSubscription?.cancel();
+      _eventsSubscription = _firestore.collection('events').snapshots().listen(
+        (snapshot) {
+          if (_isDisposed || !mounted) return;
+          
+          // Parse dữ liệu
+          final newEventsMap = <DateTime, List<Event>>{};
+          for (var doc in snapshot.docs) {
+            try {
+              final event = Event.fromFirestore(doc.data(), doc.id);
+              if (event.date != null) {
+                // Normalize date để làm key
+                final normalizedDate = DateTime.utc(
+                  event.date!.year,
+                  event.date!.month,
+                  event.date!.day,
+                );
+                if (!newEventsMap.containsKey(normalizedDate)) {
+                  newEventsMap[normalizedDate] = [];
+                }
+                newEventsMap[normalizedDate]!.add(event);
+              }
+            } catch (e) {
+              debugPrint('Lỗi khi parse event: $e');
+            }
+          }
+          
+          // Cập nhật UI ngay lập tức nếu widget vẫn mounted
+          if (!_isDisposed && mounted) {
+            setState(() {
+              _events.clear();
+              _events.addAll(newEventsMap);
+            });
+          }
+        },
+        onError: (error) {
+          debugPrint('Lỗi khi listen events: $error');
+        },
+        cancelOnError: false,
+      );
+    } catch (e) {
+      debugPrint('Lỗi khi setup Firestore listeners: $e');
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final selectedEvents = _getEventsForDay(_selectedDay ?? _focusedDay);
+    final selectedEventTitles = _getEventTitlesForDay(_selectedDay ?? _focusedDay);
 
     return Scaffold(
       appBar: AppBar(
@@ -195,26 +312,71 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               outsideDaysVisible: false,
             ),
             calendarBuilders: CalendarBuilders(
-              // Hiển thị marker cho ngày được đánh dấu
+              // Hiển thị marker cho ngày có events hoặc được đánh dấu
               markerBuilder: (context, date, events) {
-                if (_isMarked(date)) {
+                final normalizedDay = DateTime.utc(date.year, date.month, date.day);
+                final hasEvents = _events.containsKey(normalizedDay) && _events[normalizedDay]!.isNotEmpty;
+                final isMarked = _isMarked(date);
+                
+                if (hasEvents || isMarked) {
                   return Positioned(
                     bottom: 1,
-                    child: Container(
-                      width: 7,
-                      height: 7,
-                      decoration: const BoxDecoration(
-                        color: Colors.orange,
-                        shape: BoxShape.circle,
-                      ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (hasEvents)
+                          Container(
+                            width: 6,
+                            height: 6,
+                            margin: const EdgeInsets.only(right: 2),
+                            decoration: const BoxDecoration(
+                              color: Colors.blue,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        if (isMarked)
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              color: Colors.orange,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 }
                 return null;
               },
-              // Tùy chỉnh màu nền cho ngày được đánh dấu (không phải ngày được chọn)
+              // Tùy chỉnh màu nền cho ngày có events hoặc được đánh dấu
               defaultBuilder: (context, date, focused) {
-                if (_isMarked(date) && !isSameDay(_selectedDay, date)) {
+                final normalizedDay = DateTime.utc(date.year, date.month, date.day);
+                final hasEvents = _events.containsKey(normalizedDay) && _events[normalizedDay]!.isNotEmpty;
+                final isMarked = _isMarked(date) && !isSameDay(_selectedDay, date);
+                
+                if (hasEvents && !isSameDay(_selectedDay, date)) {
+                  return Container(
+                    margin: const EdgeInsets.all(4.0),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.15),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.blue,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${date.day}',
+                        style: TextStyle(
+                          color: Colors.blue[900],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  );
+                } else if (isMarked) {
                   return Container(
                     margin: const EdgeInsets.all(4.0),
                     decoration: BoxDecoration(
@@ -275,10 +437,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 : ListView.builder(
                     itemCount: selectedEvents.length,
                     itemBuilder: (context, index) {
+                      final event = selectedEvents[index];
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
                         child: ListTile(
-                          title: Text(selectedEvents[index]),
+                          leading: CircleAvatar(
+                            backgroundColor: event.color,
+                            child: Icon(event.icon, color: Colors.white, size: 20),
+                          ),
+                          title: Text(event.title),
+                          subtitle: Text(event.time),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -287,7 +455,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                 onPressed: () => _showEventDetailsDialog(
                                   context,
                                   _selectedDay ?? _focusedDay,
-                                  selectedEvents[index],
+                                  event.title,
                                 ),
                                 tooltip: 'Xem chi tiết',
                               ),
@@ -297,7 +465,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                   context,
                                   _selectedDay ?? _focusedDay,
                                   index,
-                                  selectedEvents[index],
+                                  event.title,
                                 ),
                                 tooltip: 'Xóa sự kiện',
                               ),
@@ -306,7 +474,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           onTap: () => _showEventDetailsDialog(
                             context,
                             _selectedDay ?? _focusedDay,
-                            selectedEvents[index],
+                            event.title,
                           ),
                         ),
                       );
