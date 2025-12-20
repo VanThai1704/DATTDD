@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' as scheduler;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 // Model cho Event
 class Event {
+  final String? id; // ID từ Firestore
   final String title;
   final String time;
   final DateTime? date;
@@ -13,23 +16,72 @@ class Event {
   final Color color;
 
   Event({
+    this.id,
     required this.title,
     required this.time,
     this.date,
     required this.icon,
     required this.color,
   });
+
+  // Chuyển đổi Event thành Map để lưu vào JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'time': time,
+      'date': date?.toIso8601String(),
+      'iconCodePoint': icon.codePoint,
+      'iconFontFamily': icon.fontFamily,
+      'iconFontPackage': icon.fontPackage,
+      'colorValue': color.value,
+    };
+  }
+
+  // Tạo Event từ Map (từ Firestore)
+  factory Event.fromFirestore(Map<String, dynamic> json, String? id) {
+    return Event(
+      id: id,
+      title: json['title'] as String,
+      time: json['time'] as String,
+      date: json['date'] != null ? (json['date'] as Timestamp).toDate() : null,
+      icon: IconData(
+        json['iconCodePoint'] as int,
+        fontFamily: json['iconFontFamily'] as String?,
+        fontPackage: json['iconFontPackage'] as String?,
+      ),
+      color: Color(json['colorValue'] as int),
+    );
+  }
 }
 
 // Model cho Task
 class Task {
+  final String? id; // ID từ Firestore
   final String title;
   final String deadline;
 
   Task({
+    this.id,
     required this.title,
     required this.deadline,
   });
+
+  // Chuyển đổi Task thành Map để lưu vào Firestore
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'deadline': deadline,
+    };
+  }
+
+  // Tạo Task từ Map (từ Firestore)
+  factory Task.fromFirestore(Map<String, dynamic> json, String? id) {
+    return Task(
+      id: id,
+      title: json['title'] as String,
+      deadline: json['deadline'] as String,
+    );
+  }
 }
 
 class HomeScreen extends StatefulWidget {
@@ -50,16 +102,81 @@ class _HomeScreenState extends State<HomeScreen> {
   // Set để lưu các event đã gửi thông báo đến giờ (tránh trùng lặp)
   final Set<String> _notifiedStartEvents = {};
 
+  // Danh sách events và tasks (lưu trong memory)
+  final List<Event> _events = [];
+  final List<Task> _tasks = [];
+
+  // Firestore instance
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  StreamSubscription<QuerySnapshot>? _eventsSubscription;
+  StreamSubscription<QuerySnapshot>? _tasksSubscription;
+  bool _isDisposed = false; // Flag để đánh dấu widget đã dispose
+
+  // Helper method để gọi setState một cách an toàn
+  void _safeSetState(VoidCallback fn) {
+    if (!_isDisposed && mounted) {
+      try {
+        setState(fn);
+      } catch (e) {
+        debugPrint('Lỗi khi gọi setState: $e');
+      }
+    }
+  }
+
+  // Helper method để schedule frame callback an toàn (không tạo widget dependency)
+  void _safeScheduleFrameCallback(VoidCallback callback) {
+    if (!_isDisposed && mounted) {
+      try {
+        scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (!_isDisposed && mounted) {
+            callback();
+          }
+        });
+      } catch (e) {
+        debugPrint('Lỗi khi schedule frame callback: $e');
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _initializeNotifications();
     _startNotificationChecker();
+    // Load dữ liệu và lắng nghe thay đổi từ Firestore
+    // Đợi để đảm bảo Firebase đã sẵn sàng và widget đã mounted
+    scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!_isDisposed && mounted) {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!_isDisposed && mounted) {
+            _setupFirestoreListeners();
+          }
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
-    _notificationTimer?.cancel();
+    // Đánh dấu widget đã dispose TRƯỚC khi cancel subscriptions
+    // Điều này đảm bảo không có callback nào có thể gọi setState sau khi dispose
+    _isDisposed = true;
+    
+    // Cancel tất cả subscriptions ngay lập tức và đảm bảo không có callback nào chạy
+    try {
+      _notificationTimer?.cancel();
+      _notificationTimer = null;
+      
+      // Cancel subscriptions ngay lập tức (không pause vì có thể gây race condition)
+      _eventsSubscription?.cancel();
+      _eventsSubscription = null;
+      
+      _tasksSubscription?.cancel();
+      _tasksSubscription = null;
+    } catch (e) {
+      debugPrint('Lỗi khi cancel subscriptions trong dispose: $e');
+    }
+    
     super.dispose();
   }
 
@@ -96,14 +213,25 @@ class _HomeScreenState extends State<HomeScreen> {
   void _startNotificationChecker() {
     // Kiểm tra mỗi phút
     _notificationTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
-      _checkUpcomingEvents();
+      if (!_isDisposed && mounted) {
+        _checkUpcomingEvents();
+      } else {
+        timer.cancel();
+      }
     });
     // Kiểm tra ngay lập tức
-    _checkUpcomingEvents();
+    if (!_isDisposed && mounted) {
+      _checkUpcomingEvents();
+    }
   }
 
   // Kiểm tra các sự kiện sắp tới và gửi thông báo
   void _checkUpcomingEvents() {
+    // Kiểm tra disposed và mounted trước khi xử lý
+    if (_isDisposed || !mounted) {
+      return;
+    }
+    
     final now = DateTime.now();
     
     for (int i = 0; i < _events.length; i++) {
@@ -139,7 +267,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Gửi thông báo sắp tới
         _showNotification(
           'Sự kiện sắp tới',
-          '${event.title} sẽ bắt đầu trong ${minutesUntilEvent} phút',
+          '${event.title} sẽ bắt đầu trong $minutesUntilEvent phút',
         );
         // Đánh dấu đã gửi thông báo sắp tới
         _notifiedEvents.add(eventKey);
@@ -196,42 +324,197 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Danh sách events và tasks (lưu trong memory)
-  List<Event> _events = [
-    Event(
-      title: 'Họp nhóm',
-      time: '10:00 AM - 11:00 AM',
-      date: DateTime.now(),
-      icon: Icons.group,
-      color: Colors.orange,
-    ),
-    Event(
-      title: 'Làm bài tập lớn',
-      time: '2:00 PM - 4:00 PM',
-      date: DateTime.now(),
-      icon: Icons.assignment,
-      color: Colors.blue,
-    ),
-  ];
+  // Thiết lập listeners cho Firestore để tự động cập nhật khi có thay đổi
+  void _setupFirestoreListeners() {
+    if (_isDisposed || !mounted) return;
+    
+    // Kiểm tra Firebase đã được khởi tạo chưa
+    try {
+      if (Firebase.apps.isEmpty) {
+        debugPrint('Firebase chưa được khởi tạo, bỏ qua setup listeners');
+        // Thử lại sau 1 giây
+        Future.delayed(const Duration(seconds: 1), () {
+          if (!_isDisposed && mounted) {
+            _setupFirestoreListeners();
+          }
+        });
+        return;
+      }
+    } catch (e) {
+      debugPrint('Lỗi khi kiểm tra Firebase: $e');
+      // Thử lại sau 1 giây nếu có lỗi
+      Future.delayed(const Duration(seconds: 1), () {
+        if (!_isDisposed && mounted) {
+          _setupFirestoreListeners();
+        }
+      });
+      return;
+    }
+    
+    try {
+      // Listen cho Events
+      _eventsSubscription?.cancel(); // Cancel subscription cũ nếu có
+      _eventsSubscription = _firestore.collection('events').snapshots().listen(
+        (snapshot) {
+          // Kiểm tra disposed và mounted ngay đầu callback
+          if (_isDisposed || !mounted) {
+            return;
+          }
+          
+          // Parse dữ liệu trước
+          final newEvents = <Event>[];
+          for (var doc in snapshot.docs) {
+            try {
+              newEvents.add(Event.fromFirestore(doc.data(), doc.id));
+            } catch (e) {
+              debugPrint('Lỗi khi parse event: $e');
+            }
+          }
+          
+          // Sử dụng SchedulerBinding thay vì WidgetsBinding để tránh tạo widget dependency
+          // Kiểm tra lại mounted trước khi schedule callback
+          if (!_isDisposed && mounted) {
+            scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+              // Kiểm tra lại sau postFrameCallback
+              if (!_isDisposed && mounted) {
+                try {
+                  // Sử dụng helper method để gọi setState an toàn
+                  _safeSetState(() {
+                    _events.clear();
+                    _events.addAll(newEvents);
+                  });
+                } catch (e) {
+                  debugPrint('Lỗi khi xử lý events: $e');
+                }
+              }
+            });
+          }
+        },
+        onError: (error) {
+          debugPrint('Lỗi khi listen events: $error');
+        },
+        cancelOnError: false,
+      );
 
-  List<Task> _tasks = [
-    Task(title: 'Nộp báo cáo', deadline: 'Hạn chót: Ngày mai'),
-    Task(title: 'Kiểm tra giữa kỳ', deadline: 'Hạn chót: 25/05/2024'),
-  ];
+      // Listen cho Tasks
+      _tasksSubscription?.cancel(); // Cancel subscription cũ nếu có
+      _tasksSubscription = _firestore.collection('tasks').snapshots().listen(
+        (snapshot) {
+          // Kiểm tra disposed và mounted ngay đầu callback
+          if (_isDisposed || !mounted) {
+            return;
+          }
+          
+          // Parse dữ liệu trước
+          final newTasks = <Task>[];
+          for (var doc in snapshot.docs) {
+            try {
+              newTasks.add(Task.fromFirestore(doc.data(), doc.id));
+            } catch (e) {
+              debugPrint('Lỗi khi parse task: $e');
+            }
+          }
+          
+          // Sử dụng SchedulerBinding thay vì WidgetsBinding để tránh tạo widget dependency
+          // Kiểm tra lại mounted trước khi schedule callback
+          if (!_isDisposed && mounted) {
+            scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+              // Kiểm tra lại sau postFrameCallback
+              if (!_isDisposed && mounted) {
+                try {
+                  // Sử dụng helper method để gọi setState an toàn
+                  _safeSetState(() {
+                    _tasks.clear();
+                    _tasks.addAll(newTasks);
+                  });
+                } catch (e) {
+                  debugPrint('Lỗi khi xử lý tasks: $e');
+                }
+              }
+            });
+          }
+        },
+        onError: (error) {
+          debugPrint('Lỗi khi listen tasks: $error');
+        },
+        cancelOnError: false,
+      );
+    } catch (e) {
+      debugPrint('Lỗi khi setup Firestore listeners: $e');
+    }
+  }
+
+  // Lưu Event vào Firestore
+  Future<void> _saveEvent(Event event) async {
+    try {
+      final eventData = event.toJson();
+      // Chuyển đổi DateTime thành Timestamp cho Firestore
+      if (event.date != null) {
+        eventData['date'] = Timestamp.fromDate(event.date!);
+      }
+      
+      if (event.id != null) {
+        // Update existing event
+        await _firestore.collection('events').doc(event.id).update(eventData);
+      } else {
+        // Add new event
+        await _firestore.collection('events').add(eventData);
+      }
+    } catch (e) {
+      debugPrint('Lỗi khi lưu event: $e');
+    }
+  }
+
+  // Lưu Task vào Firestore
+  Future<void> _saveTask(Task task) async {
+    try {
+      final taskData = task.toJson();
+      
+      if (task.id != null) {
+        // Update existing task
+        await _firestore.collection('tasks').doc(task.id).update(taskData);
+      } else {
+        // Add new task
+        await _firestore.collection('tasks').add(taskData);
+      }
+    } catch (e) {
+      debugPrint('Lỗi khi lưu task: $e');
+    }
+  }
+
+  // Xóa Event từ Firestore
+  Future<void> _deleteEventFromFirestore(String eventId) async {
+    try {
+      await _firestore.collection('events').doc(eventId).delete();
+    } catch (e) {
+      debugPrint('Lỗi khi xóa event: $e');
+    }
+  }
+
+  // Xóa Task từ Firestore
+  Future<void> _deleteTaskFromFirestore(String taskId) async {
+    try {
+      await _firestore.collection('tasks').doc(taskId).delete();
+    } catch (e) {
+      debugPrint('Lỗi khi xóa task: $e');
+    }
+  }
 
   // Hàm xóa Event
   void _deleteEvent(int index) {
-    setState(() {
-      _events.removeAt(index);
-    });
+    final event = _events[index];
+    if (event.id != null) {
+      _deleteEventFromFirestore(event.id!);
+    }
     _showNotification('Đã xóa', 'Sự kiện đã được xóa');
   }
 
   // Hàm xóa Task
   void _deleteTask(int index) {
-    setState(() {
-      _tasks.removeAt(index);
-    });
+    final task = _tasks[index];
+    if (task.id != null) {
+      _deleteTaskFromFirestore(task.id!);
+    }
     _showNotification('Đã xóa', 'Nhiệm vụ đã được xóa');
   }
 
@@ -425,8 +708,6 @@ class _HomeScreenState extends State<HomeScreen> {
     endTime ??= TimeOfDay(hour: TimeOfDay.now().hour + 1, minute: TimeOfDay.now().minute);
     IconData selectedIcon = event.icon;
     Color selectedColor = event.color;
-    // Lưu context của widget chính
-    final scaffoldContext = this.context;
 
     showDialog(
       context: context,
@@ -609,7 +890,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: () {
                       final title = titleController.text.trim();
                       if (title.isEmpty) {
-                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Vui lòng nhập tên sự kiện'),
                             backgroundColor: Colors.red,
@@ -618,7 +899,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         return;
                       }
                       if (selectedDate == null) {
-                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Vui lòng chọn ngày'),
                             backgroundColor: Colors.red,
@@ -627,7 +908,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         return;
                       }
                       if (startTime == null) {
-                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Vui lòng chọn giờ bắt đầu'),
                             backgroundColor: Colors.red,
@@ -636,7 +917,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         return;
                       }
                       if (endTime == null) {
-                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Vui lòng chọn giờ kết thúc'),
                             backgroundColor: Colors.red,
@@ -648,7 +929,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       final startMinutes = startTime!.hour * 60 + startTime!.minute;
                       final endMinutes = endTime!.hour * 60 + endTime!.minute;
                       if (endMinutes <= startMinutes) {
-                        ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Giờ kết thúc phải sau giờ bắt đầu'),
                             backgroundColor: Colors.red,
@@ -658,21 +939,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       }
                       // Lưu giá trị trước khi đóng dialog
                       final updatedEvent = Event(
+                        id: event.id, // Giữ lại ID để update
                         title: title,
                         time: '${_formatTimeOfDay(startTime!)} - ${_formatTimeOfDay(endTime!)}',
                         date: selectedDate,
                         icon: selectedIcon,
                         color: selectedColor,
                       );
-                      final eventIndex = index;
                       // Đóng dialog trước
                       Navigator.pop(dialogContext);
-                      // Cập nhật state sau khi dialog đóng
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted) {
-                          setState(() {
-                            _events[eventIndex] = updatedEvent;
-                          });
+                      // Sử dụng SchedulerBinding để schedule callback an toàn (sau khi dialog đóng)
+                      scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+                        if (!_isDisposed && mounted) {
+                          _saveEvent(updatedEvent);
                           _showNotification('Đã cập nhật', 'Sự kiện đã được chỉnh sửa');
                         }
                       });
@@ -695,8 +974,6 @@ class _HomeScreenState extends State<HomeScreen> {
     // Parse deadline để lấy ngày (bỏ phần "Hạn chót: ")
     final deadlineText = task.deadline.replaceFirst('Hạn chót: ', '');
     final deadlineController = TextEditingController(text: deadlineText);
-    // Lưu context của widget chính
-    final scaffoldContext = this.context;
 
     showDialog(
       context: context,
@@ -746,7 +1023,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   final title = titleController.text.trim();
                   final deadline = deadlineController.text.trim();
                   if (title.isEmpty) {
-                    ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                    ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Vui lòng nhập tên nhiệm vụ'),
                         backgroundColor: Colors.red,
@@ -755,7 +1032,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     return;
                   }
                   if (deadline.isEmpty) {
-                    ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                    ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('Vui lòng nhập hạn chót'),
                         backgroundColor: Colors.red,
@@ -765,18 +1042,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   }
                   // Lưu giá trị trước khi đóng dialog
                   final updatedTask = Task(
+                    id: task.id, // Giữ lại ID để update
                     title: title,
                     deadline: 'Hạn chót: $deadline',
                   );
-                  final taskIndex = index;
                   // Đóng dialog trước
                   Navigator.pop(dialogContext);
-                  // Cập nhật state sau khi dialog đóng
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) {
-                      setState(() {
-                        _tasks[taskIndex] = updatedTask;
-                      });
+                  // Sử dụng SchedulerBinding để schedule callback an toàn (sau khi dialog đóng)
+                  scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+                    if (!_isDisposed && mounted) {
+                      _saveTask(updatedTask);
                       _showNotification('Đã cập nhật', 'Nhiệm vụ đã được chỉnh sửa');
                     }
                   });
@@ -903,8 +1178,6 @@ class _HomeScreenState extends State<HomeScreen> {
     TimeOfDay? endTime;
     IconData selectedIcon = Icons.event;
     Color selectedColor = Colors.blue;
-    // Lưu context của widget chính
-    final scaffoldContext = this.context;
 
     showDialog(
       context: context,
@@ -1087,7 +1360,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () {
                     final title = titleController.text.trim();
                     if (title.isEmpty) {
-                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                      ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Vui lòng nhập tên sự kiện'),
                           backgroundColor: Colors.red,
@@ -1096,7 +1369,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       return;
                     }
                     if (selectedDate == null) {
-                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                      ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Vui lòng chọn ngày'),
                           backgroundColor: Colors.red,
@@ -1105,7 +1378,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       return;
                     }
                     if (startTime == null) {
-                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                      ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Vui lòng chọn giờ bắt đầu'),
                           backgroundColor: Colors.red,
@@ -1114,7 +1387,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       return;
                     }
                     if (endTime == null) {
-                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                      ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Vui lòng chọn giờ kết thúc'),
                           backgroundColor: Colors.red,
@@ -1126,7 +1399,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     final startMinutes = startTime!.hour * 60 + startTime!.minute;
                     final endMinutes = endTime!.hour * 60 + endTime!.minute;
                     if (endMinutes <= startMinutes) {
-                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                      ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Giờ kết thúc phải sau giờ bắt đầu'),
                           backgroundColor: Colors.red,
@@ -1145,12 +1418,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     final eventTitle = title;
                     // Đóng dialog trước (controller sẽ được dispose trong PopScope.onPopInvoked)
                     Navigator.pop(dialogContext);
-                    // Cập nhật state sau khi dialog đóng
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) {
-                        setState(() {
-                          _events.add(newEvent);
-                        });
+                    // Sử dụng SchedulerBinding để schedule callback an toàn (sau khi dialog đóng)
+                    scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+                      if (!_isDisposed && mounted) {
+                        _saveEvent(newEvent);
                         _showNotification('Sự kiện mới', 'Đã thêm: $eventTitle');
                       }
                     });
@@ -1262,12 +1533,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     final taskTitle = title;
                     // Đóng dialog trước (controller sẽ được dispose trong PopScope.onPopInvoked)
                     Navigator.pop(dialogContext);
-                    // Cập nhật state sau khi dialog đóng
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) {
-                        setState(() {
-                          _tasks.add(newTask);
-                        });
+                    // Sử dụng SchedulerBinding để schedule callback an toàn (sau khi dialog đóng)
+                    scheduler.SchedulerBinding.instance.addPostFrameCallback((_) {
+                      if (!_isDisposed && mounted) {
+                        _saveTask(newTask);
                         _showNotification('Nhiệm vụ mới', 'Đã thêm: $taskTitle');
                       }
                     });

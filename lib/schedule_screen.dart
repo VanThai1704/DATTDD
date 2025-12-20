@@ -12,13 +12,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   CalendarFormat _calendarFormat = CalendarFormat.month;
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-  Map<DateTime, List<String>> _events = {
+  final Map<DateTime, List<String>> _events = {
     DateTime.utc(2024, 5, 20): ['Họp nhóm', 'Làm bài tập lớn'],
     DateTime.utc(2024, 5, 22): ['Kiểm tra giữa kỳ'],
   };
   
   // Set để lưu các ngày đã được đánh dấu
-  Set<DateTime> _markedDays = {};
+  final Set<DateTime> _markedDays = {};
 
   // Hàm xóa sự kiện trong lịch
   void _deleteEvent(DateTime day, int index) {

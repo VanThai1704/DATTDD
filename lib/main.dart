@@ -1,8 +1,16 @@
 import 'package:datbdd/home_screen.dart';
 import 'package:datbdd/schedule_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint('Lỗi khởi tạo Firebase: $e');
+    // Vẫn chạy app nếu Firebase lỗi (để debug)
+  }
   runApp(const MyApp());
 }
 

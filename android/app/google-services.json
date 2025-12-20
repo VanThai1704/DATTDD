@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "1088489529502",
+    "project_id": "datbdd-2cf65",
+    "storage_bucket": "datbdd-2cf65.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1088489529502:android:2b35df46820912678ddb8f",
+        "android_client_info": {
+          "package_name": "com.example.datbdd"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA6LtvGEXGhckiaAj5ne7nJ12t5cUaaiSw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
+
