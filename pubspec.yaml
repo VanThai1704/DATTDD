@@ -15,6 +15,16 @@ dependencies:
   intl: ^0.19.0
   firebase_core: ^3.6.0
   cloud_firestore: ^5.4.3
+  timezone: ^0.9.2
+  shared_preferences: ^2.2.2
+  fl_chart: ^0.66.0
+  flutter_animate: ^4.5.0
+  convex_bottom_bar: ^3.2.0
+  shimmer: ^3.0.0
+  permission_handler: ^11.3.1
+  vibration: ^2.0.1
+  badges: ^3.1.2
+  audioplayers: ^5.2.1
 
 dev_dependencies:
   flutter_test:
