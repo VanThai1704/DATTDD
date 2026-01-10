@@ -98,7 +98,6 @@ class _StatsScreenState extends State<StatsScreen> {
         setState(() {
           _totalFocusMinutes = totalMinutes;
           _completedTasksCount = completed;
-          _overdueTasksCount = overdue;
           _currentStreak = streak;
           _weeklyData = weekly;
           _isLoading = false;

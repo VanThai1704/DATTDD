@@ -62,21 +62,6 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
 
   Future<void> _loadData() async {
     await _loadTodayStats();
-    await _loadPendingTasks();
-  }
-
-  Future<void> _loadPendingTasks() async {
-    final snapshot = await _firestore
-        .collection('tasks')
-        .where('isCompleted', isEqualTo: false)
-        .get();
-    if (mounted) {
-      setState(() {
-        _pendingTasks = snapshot.docs
-            .map((doc) => Task.fromFirestore(doc.data(), doc.id))
-            .toList();
-      });
-    }
   }
 
   Future<void> _loadTodayStats() async {
@@ -101,11 +86,12 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       checkDate = checkDate.subtract(const Duration(days: 1));
     }
 
-    if (mounted)
+    if (mounted) {
       setState(() {
         _totalFocusMinutes = total;
         _currentStreak = streak;
       });
+    }
   }
 
   Future<void> _initializeNotifications() async {
