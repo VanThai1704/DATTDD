@@ -27,7 +27,7 @@ Future<void> _requestPermissions() async {
   if (await Permission.notification.isDenied) {
     await Permission.notification.request();
   }
-  
+
   // Request schedule exact alarm permission (Android 12+)
   if (await Permission.scheduleExactAlarm.isDenied) {
     await Permission.scheduleExactAlarm.request();
@@ -49,7 +49,11 @@ class MyApp extends StatelessWidget {
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF0F0F0F),
           elevation: 0,
-          titleTextStyle: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+          titleTextStyle: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
           iconTheme: IconThemeData(color: Colors.white),
         ),
       ),
@@ -77,15 +81,15 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _screens,
-      ),
+      body: IndexedStack(index: _selectedIndex, children: _screens),
       bottomNavigationBar: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('tasks').where('isCompleted', isEqualTo: false).snapshots(),
+        stream: FirebaseFirestore.instance
+            .collection('tasks')
+            .where('isCompleted', isEqualTo: false)
+            .snapshots(),
         builder: (context, snapshot) {
           int pendingCount = snapshot.hasData ? snapshot.data!.docs.length : 0;
-          
+
           return ConvexAppBar(
             style: TabStyle.reactCircle,
             backgroundColor: const Color(0xFF1A1A1A),
@@ -93,13 +97,19 @@ class _MainScreenState extends State<MainScreen> {
             activeColor: Colors.blueAccent,
             items: [
               TabItem(
-                icon: pendingCount > 0 
-                  ? badges.Badge(
-                      badgeContent: Text('$pendingCount', style: const TextStyle(color: Colors.white, fontSize: 10)),
-                      child: const Icon(Icons.home, color: Colors.white24),
-                    )
-                  : Icons.home, 
-                title: 'HOME'
+                icon: pendingCount > 0
+                    ? badges.Badge(
+                        badgeContent: Text(
+                          '$pendingCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                          ),
+                        ),
+                        child: const Icon(Icons.home, color: Colors.white24),
+                      )
+                    : Icons.home,
+                title: 'HOME',
               ),
               const TabItem(icon: Icons.calendar_month, title: 'CALENDAR'),
               const TabItem(icon: Icons.timer, title: 'FOCUS'),
@@ -108,7 +118,7 @@ class _MainScreenState extends State<MainScreen> {
             initialActiveIndex: _selectedIndex,
             onTap: (int i) => setState(() => _selectedIndex = i),
           );
-        }
+        },
       ),
     );
   }

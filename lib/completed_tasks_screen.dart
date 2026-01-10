@@ -14,9 +14,21 @@ class CompletedTasksScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F0F0F),
         elevation: 0,
-        title: const Text('COMPLETED TASKS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 14)),
+        title: const Text(
+          'COMPLETED TASKS',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 2,
+            fontSize: 14,
+          ),
+        ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+          icon: const Icon(
+            Icons.arrow_back_ios_new,
+            color: Colors.white,
+            size: 18,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -27,7 +39,9 @@ class CompletedTasksScreen extends StatelessWidget {
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: Colors.blueAccent));
+            return const Center(
+              child: CircularProgressIndicator(color: Colors.blueAccent),
+            );
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
@@ -35,16 +49,38 @@ class CompletedTasksScreen extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.history_toggle_off, size: 64, color: Colors.white.withOpacity(0.05)),
+                  Icon(
+                    Icons.history_toggle_off,
+                    size: 64,
+                    color: Colors.white.withOpacity(0.05),
+                  ),
                   const SizedBox(height: 16),
-                  const Text('NO COMPLETED TASKS YET', style: TextStyle(color: Colors.white24, letterSpacing: 1, fontSize: 12)),
+                  const Text(
+                    'NO COMPLETED TASKS YET',
+                    style: TextStyle(
+                      color: Colors.white24,
+                      letterSpacing: 1,
+                      fontSize: 12,
+                    ),
+                  ),
                 ],
               ),
             );
           }
 
-          final tasks = snapshot.data!.docs.map((doc) => Task.fromFirestore(doc.data() as Map<String, dynamic>, doc.id)).toList();
-          tasks.sort((a, b) => (b.completedAt ?? DateTime.now()).compareTo(a.completedAt ?? DateTime.now()));
+          final tasks = snapshot.data!.docs
+              .map(
+                (doc) => Task.fromFirestore(
+                  doc.data() as Map<String, dynamic>,
+                  doc.id,
+                ),
+              )
+              .toList();
+          tasks.sort(
+            (a, b) => (b.completedAt ?? DateTime.now()).compareTo(
+              a.completedAt ?? DateTime.now(),
+            ),
+          );
 
           return ListView.builder(
             padding: const EdgeInsets.all(20),
@@ -57,33 +93,62 @@ class CompletedTasksScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: const Color(0xFF1A1A1A),
                   borderRadius: BorderRadius.circular(15),
-                  border: Border.all(color: Colors.greenAccent.withOpacity(0.05)),
+                  border: Border.all(
+                    color: Colors.greenAccent.withOpacity(0.05),
+                  ),
                 ),
                 child: Row(
                   children: [
                     Container(
                       padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: Colors.greenAccent.withOpacity(0.1), shape: BoxShape.circle),
-                      child: const Icon(Icons.check, color: Colors.greenAccent, size: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.greenAccent.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.check,
+                        color: Colors.greenAccent,
+                        size: 16,
+                      ),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(t.title, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+                          Text(
+                            t.title,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           if (t.completedAt != null)
                             Text(
                               'Done: ${DateFormat('dd MMM yyyy, HH:mm').format(t.completedAt!)}',
-                              style: const TextStyle(color: Colors.white24, fontSize: 10),
+                              style: const TextStyle(
+                                color: Colors.white24,
+                                fontSize: 10,
+                              ),
                             ),
                         ],
                       ),
                     ),
                     const Column(
                       children: [
-                        Icon(Icons.monetization_on, color: Colors.amber, size: 16),
-                        Text('+10', style: TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.bold)),
+                        Icon(
+                          Icons.monetization_on,
+                          color: Colors.amber,
+                          size: 16,
+                        ),
+                        Text(
+                          '+10',
+                          style: TextStyle(
+                            color: Colors.amber,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ],

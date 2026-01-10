@@ -9,8 +9,10 @@ class ChecklistItem {
   ChecklistItem({required this.title, this.isDone = false});
 
   Map<String, dynamic> toJson() => {'title': title, 'isDone': isDone};
-  factory ChecklistItem.fromJson(Map<String, dynamic> json) => 
-      ChecklistItem(title: json['title'] ?? '', isDone: json['isDone'] ?? false);
+  factory ChecklistItem.fromJson(Map<String, dynamic> json) => ChecklistItem(
+    title: json['title'] ?? '',
+    isDone: json['isDone'] ?? false,
+  );
 }
 
 class Project {
@@ -21,11 +23,12 @@ class Project {
   Project({this.id, required this.name, required this.colorValue});
 
   Map<String, dynamic> toJson() => {'name': name, 'colorValue': colorValue};
-  factory Project.fromFirestore(Map<String, dynamic> data, String id) => Project(
-    id: id,
-    name: data['name'] ?? '',
-    colorValue: data['colorValue'] ?? Colors.blue.value,
-  );
+  factory Project.fromFirestore(Map<String, dynamic> data, String id) =>
+      Project(
+        id: id,
+        name: data['name'] ?? '',
+        colorValue: data['colorValue'] ?? Colors.blue.value,
+      );
 }
 
 class UserStats {
@@ -45,7 +48,9 @@ class UserStats {
     'coins': coins,
     'streakFreezes': streakFreezes,
     'currentStreak': currentStreak,
-    'lastStreakDate': lastStreakDate != null ? Timestamp.fromDate(lastStreakDate!) : null,
+    'lastStreakDate': lastStreakDate != null
+        ? Timestamp.fromDate(lastStreakDate!)
+        : null,
   };
 
   factory UserStats.fromFirestore(Map<String, dynamic> data) => UserStats(
@@ -87,7 +92,9 @@ class Task {
     'deadlineDateTime': Timestamp.fromDate(deadlineDateTime),
     'durationMinutes': durationMinutes,
     'isCompleted': isCompleted,
-    'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : null,
+    'completedAt': completedAt != null
+        ? Timestamp.fromDate(completedAt!)
+        : null,
     'priority': priority.index,
     'projectId': projectId,
     'checklist': checklist.map((e) => e.toJson()).toList(),
@@ -103,10 +110,17 @@ class Task {
     completedAt: (data['completedAt'] as Timestamp?)?.toDate(),
     priority: TaskPriority.values[data['priority'] ?? 1],
     projectId: data['projectId'],
-    checklist: (data['checklist'] as List? ?? []).map((e) => ChecklistItem.fromJson(e)).toList(),
+    checklist: (data['checklist'] as List? ?? [])
+        .map((e) => ChecklistItem.fromJson(e))
+        .toList(),
   );
 
-  Task copyWith({String? id, bool? isCompleted, DateTime? completedAt, List<ChecklistItem>? checklist}) {
+  Task copyWith({
+    String? id,
+    bool? isCompleted,
+    DateTime? completedAt,
+    List<ChecklistItem>? checklist,
+  }) {
     return Task(
       id: id ?? this.id,
       title: title,

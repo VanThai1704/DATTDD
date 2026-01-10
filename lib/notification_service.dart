@@ -4,35 +4,44 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'models.dart';
 
 class NotificationService {
-  static final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
 
   static Future<void> init() async {
     tz.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation('Asia/Ho_Chi_Minh'));
-    
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
-    const initSettings = InitializationSettings(android: androidSettings, iOS: iosSettings);
-    
+    const initSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: iosSettings,
+    );
+
     await _notifications.initialize(
       initSettings,
       onDidReceiveNotificationResponse: (details) {
         print('Notification tapped: ${details.payload}');
       },
     );
-    
+
     // Request exact alarm permission
-    final androidImpl = _notifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-    
+    final androidImpl = _notifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+
     if (androidImpl != null) {
       // Request exact alarms permission
       final granted = await androidImpl.requestExactAlarmsPermission();
       print('Exact alarms permission: $granted');
-      
+
       // Check if can schedule exact alarms
       final canSchedule = await androidImpl.canScheduleExactNotifications();
       print('Can schedule exact notifications: $canSchedule');
@@ -44,11 +53,11 @@ class NotificationService {
 
     final now = DateTime.now();
     final scheduledDate = task.deadlineDateTime;
-    
+
     print('⏰ Current time: $now');
     print('📅 Scheduling notifications for: ${task.title}');
     print('   Deadline: $scheduledDate');
-    
+
     if (scheduledDate.isBefore(now)) {
       print('⚠️ Task deadline is in the past: ${task.title}');
       return;
@@ -78,7 +87,7 @@ class NotificationService {
     if (oneDayBefore.isAfter(now)) {
       final tzTime = tz.TZDateTime.from(oneDayBefore, tz.local);
       print('   Scheduling 1 day before: $oneDayBefore (TZ: $tzTime)');
-      
+
       await _notifications.zonedSchedule(
         task.id.hashCode,
         '📅 Nhắc nhở: ${task.title}',
@@ -96,7 +105,8 @@ class NotificationService {
           ),
         ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
       );
       print('   ✅ Scheduled: 1 day before at $oneDayBefore');
     }
@@ -106,7 +116,7 @@ class NotificationService {
     if (threeHoursBefore.isAfter(now)) {
       final tzTime = tz.TZDateTime.from(threeHoursBefore, tz.local);
       print('   Scheduling 3 hours before: $threeHoursBefore (TZ: $tzTime)');
-      
+
       await _notifications.zonedSchedule(
         task.id.hashCode + 1,
         '⏰ Sắp đến hạn: ${task.title}',
@@ -124,17 +134,20 @@ class NotificationService {
           ),
         ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
       );
       print('   ✅ Scheduled: 3 hours before at $threeHoursBefore');
     }
 
     // 3. Notify 30 minutes before
-    final thirtyMinsBefore = scheduledDate.subtract(const Duration(minutes: 30));
+    final thirtyMinsBefore = scheduledDate.subtract(
+      const Duration(minutes: 30),
+    );
     if (thirtyMinsBefore.isAfter(now)) {
       final tzTime = tz.TZDateTime.from(thirtyMinsBefore, tz.local);
       print('   Scheduling 30 minutes before: $thirtyMinsBefore (TZ: $tzTime)');
-      
+
       await _notifications.zonedSchedule(
         task.id.hashCode + 2,
         '⚠️ Gần đến hạn: ${task.title}',
@@ -154,7 +167,8 @@ class NotificationService {
           ),
         ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
       );
       print('   ✅ Scheduled: 30 minutes before at $thirtyMinsBefore');
     }
@@ -162,11 +176,13 @@ class NotificationService {
     // 4. Notify at exact time
     final tzTime = tz.TZDateTime.from(scheduledDate, tz.local);
     print('   Scheduling exact time: $scheduledDate (TZ: $tzTime)');
-    
+
     await _notifications.zonedSchedule(
       task.id.hashCode + 3,
       '🔴 ĐẾN HẠN: ${task.title}',
-      task.description.isNotEmpty ? task.description : 'Bắt đầu công việc ngay thôi!',
+      task.description.isNotEmpty
+          ? task.description
+          : 'Bắt đầu công việc ngay thôi!',
       tz.TZDateTime.from(scheduledDate, tz.local),
       const NotificationDetails(
         android: AndroidNotificationDetails(
@@ -182,7 +198,8 @@ class NotificationService {
         ),
       ),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
     );
     print('   ✅ Scheduled: Exact time at $scheduledDate');
   }

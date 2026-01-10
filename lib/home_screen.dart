@@ -49,12 +49,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _setupFirestoreListeners() {
     _tasksSubscription?.cancel();
-    _tasksSubscription = _firestore.collection('tasks').snapshots().listen((snapshot) {
+    _tasksSubscription = _firestore.collection('tasks').snapshots().listen((
+      snapshot,
+    ) {
       if (_isDisposed) return;
-      final newTasks = snapshot.docs.map((doc) => Task.fromFirestore(doc.data(), doc.id)).toList();
-      
+      final newTasks = snapshot.docs
+          .map((doc) => Task.fromFirestore(doc.data(), doc.id))
+          .toList();
+
       newTasks.sort((a, b) {
-        if (a.priority != b.priority) return b.priority.index.compareTo(a.priority.index);
+        if (a.priority != b.priority)
+          return b.priority.index.compareTo(a.priority.index);
         return a.deadlineDateTime.compareTo(b.deadlineDateTime);
       });
 
@@ -68,16 +73,21 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     _projectsSubscription?.cancel();
-    _projectsSubscription = _firestore.collection('projects').snapshots().listen((snapshot) {
-      if (_isDisposed) return;
-      final newProjects = snapshot.docs.map((doc) => Project.fromFirestore(doc.data(), doc.id)).toList();
-      if (mounted) {
-        setState(() {
-          _projects.clear();
-          _projects.addAll(newProjects);
+    _projectsSubscription = _firestore
+        .collection('projects')
+        .snapshots()
+        .listen((snapshot) {
+          if (_isDisposed) return;
+          final newProjects = snapshot.docs
+              .map((doc) => Project.fromFirestore(doc.data(), doc.id))
+              .toList();
+          if (mounted) {
+            setState(() {
+              _projects.clear();
+              _projects.addAll(newProjects);
+            });
+          }
         });
-      }
-    });
   }
 
   Future<void> _saveTask(Task task) async {
@@ -90,7 +100,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final docRef = await _firestore.collection('tasks').add(data);
       docId = docRef.id;
     }
-    
+
     final updatedTask = task.copyWith(id: docId);
     NotificationService.scheduleTaskNotification(updatedTask);
   }
@@ -105,22 +115,22 @@ class _HomeScreenState extends State<HomeScreen> {
       isCompleted: !task.isCompleted,
       completedAt: !task.isCompleted ? DateTime.now() : null,
     );
-    
+
     if (updated.isCompleted) {
-       Vibration.hasVibrator().then((bool? hasVibrator) {
-         if (hasVibrator == true) {
-           Vibration.vibrate(duration: 100);
-         }
-       });
-       // Nhận 10 xu khi hoàn thành nhiệm vụ
-       await _firestore.collection('user_profile').doc('default_user').set({
-         'coins': FieldValue.increment(10),
-       }, SetOptions(merge: true));
+      Vibration.hasVibrator().then((bool? hasVibrator) {
+        if (hasVibrator == true) {
+          Vibration.vibrate(duration: 100);
+        }
+      });
+      // Nhận 10 xu khi hoàn thành nhiệm vụ
+      await _firestore.collection('user_profile').doc('default_user').set({
+        'coins': FieldValue.increment(10),
+      }, SetOptions(merge: true));
     }
-    
+
     await _saveTask(updated);
     if (updated.isCompleted && task.id != null) {
-       NotificationService.cancelNotification(task.id!);
+      NotificationService.cancelNotification(task.id!);
     }
   }
 
@@ -148,7 +158,12 @@ class _HomeScreenState extends State<HomeScreen> {
             color: Color(0xFF1A1A1A),
             borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
           ),
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 24, right: 24, top: 24),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 24,
+            right: 24,
+            top: 24,
+          ),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -157,11 +172,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('NHIỆM VỤ', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2)),
-                    if (isEdit) IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent), onPressed: () {
-                      _deleteTask(task!.id!);
-                      Navigator.pop(context);
-                    })
+                    const Text(
+                      'NHIỆM VỤ',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    if (isEdit)
+                      IconButton(
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: Colors.redAccent,
+                        ),
+                        onPressed: () {
+                          _deleteTask(task!.id!);
+                          Navigator.pop(context);
+                        },
+                      ),
                   ],
                 ),
                 const SizedBox(height: 20),
@@ -173,30 +203,54 @@ class _HomeScreenState extends State<HomeScreen> {
                     hintStyle: const TextStyle(color: Colors.white24),
                     filled: true,
                     fillColor: Colors.white.withOpacity(0.05),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide.none,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Text('DỰ ÁN', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                const Text(
+                  'DỰ ÁN',
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      ..._projects.map((p) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(p.name, style: TextStyle(color: projectId == p.id ? Colors.black : Colors.white)),
-                          selected: projectId == p.id,
-                          onSelected: (s) => setST(() => projectId = s ? p.id : null),
-                          selectedColor: Color(p.colorValue),
-                          backgroundColor: Colors.white.withOpacity(0.05),
+                      ..._projects.map(
+                        (p) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(
+                              p.name,
+                              style: TextStyle(
+                                color: projectId == p.id
+                                    ? Colors.black
+                                    : Colors.white,
+                              ),
+                            ),
+                            selected: projectId == p.id,
+                            onSelected: (s) =>
+                                setST(() => projectId = s ? p.id : null),
+                            selectedColor: Color(p.colorValue),
+                            backgroundColor: Colors.white.withOpacity(0.05),
+                          ),
                         ),
-                      )),
+                      ),
                       IconButton(
-                        icon: const Icon(Icons.add_circle_outline, color: Colors.blueAccent),
+                        icon: const Icon(
+                          Icons.add_circle_outline,
+                          color: Colors.blueAccent,
+                        ),
                         onPressed: _showAddProjectDialog,
-                      )
+                      ),
                     ],
                   ),
                 ),
@@ -204,47 +258,98 @@ class _HomeScreenState extends State<HomeScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('CHỌN NGÀY DEADLINE', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                    const Text(
+                      'CHỌN NGÀY DEADLINE',
+                      style: TextStyle(
+                        color: Colors.white38,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
                     TextButton.icon(
-                      icon: const Icon(Icons.calendar_month, size: 16, color: Colors.blueAccent),
-                      label: Text(DateFormat('dd/MM/yyyy').format(selectedDate), style: const TextStyle(color: Colors.blueAccent, fontSize: 12)),
+                      icon: const Icon(
+                        Icons.calendar_month,
+                        size: 16,
+                        color: Colors.blueAccent,
+                      ),
+                      label: Text(
+                        DateFormat('dd/MM/yyyy').format(selectedDate),
+                        style: const TextStyle(
+                          color: Colors.blueAccent,
+                          fontSize: 12,
+                        ),
+                      ),
                       onPressed: () async {
                         final d = await showDatePicker(
                           context: context,
                           initialDate: selectedDate,
                           firstDate: DateTime.now(),
                           lastDate: DateTime(2100),
-                          builder: (context, child) => Theme(data: ThemeData.dark(), child: child!),
+                          builder: (context, child) =>
+                              Theme(data: ThemeData.dark(), child: child!),
                         );
                         if (d != null) setST(() => selectedDate = d);
                       },
-                    )
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _buildDigitalPicker(hourController, 24, (val) => setST(() => selHour = val)),
-                    const Text(':', style: TextStyle(color: Colors.white24, fontSize: 30)),
-                    _buildDigitalPicker(minController, 60, (val) => setST(() => selMin = val)),
+                    _buildDigitalPicker(
+                      hourController,
+                      24,
+                      (val) => setST(() => selHour = val),
+                    ),
+                    const Text(
+                      ':',
+                      style: TextStyle(color: Colors.white24, fontSize: 30),
+                    ),
+                    _buildDigitalPicker(
+                      minController,
+                      60,
+                      (val) => setST(() => selMin = val),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 20),
-                const Text('MỨC ĐỘ ƯU TIÊN', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                const Text(
+                  'MỨC ĐỘ ƯU TIÊN',
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: TaskPriority.values.map((p) {
                     final isSel = selectedPriority == p;
-                    final color = p == TaskPriority.high ? Colors.redAccent : (p == TaskPriority.medium ? Colors.orangeAccent : Colors.greenAccent);
+                    final color = p == TaskPriority.high
+                        ? Colors.redAccent
+                        : (p == TaskPriority.medium
+                              ? Colors.orangeAccent
+                              : Colors.greenAccent);
                     return ChoiceChip(
-                      label: Text(p.name.toUpperCase(), style: TextStyle(fontSize: 10, color: isSel ? Colors.black : color)),
+                      label: Text(
+                        p.name.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: isSel ? Colors.black : color,
+                        ),
+                      ),
                       selected: isSel,
                       onSelected: (_) => setST(() => selectedPriority = p),
                       selectedColor: color,
                       backgroundColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: color.withOpacity(0.3))),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: BorderSide(color: color.withOpacity(0.3)),
+                      ),
                     );
                   }).toList(),
                 ),
@@ -253,24 +358,44 @@ class _HomeScreenState extends State<HomeScreen> {
                   width: double.infinity,
                   height: 55,
                   child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                    ),
                     onPressed: () {
                       if (titleController.text.isEmpty) return;
-                      final finalDateTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, selHour, selMin);
-                      _saveTask(Task(
-                        id: task?.id,
-                        title: titleController.text,
-                        description: descController.text,
-                        deadlineDateTime: finalDateTime,
-                        priority: selectedPriority,
-                        projectId: projectId,
-                        checklist: checklist,
-                        isCompleted: task?.isCompleted ?? false,
-                        completedAt: task?.completedAt,
-                      ));
+                      final finalDateTime = DateTime(
+                        selectedDate.year,
+                        selectedDate.month,
+                        selectedDate.day,
+                        selHour,
+                        selMin,
+                      );
+                      _saveTask(
+                        Task(
+                          id: task?.id,
+                          title: titleController.text,
+                          description: descController.text,
+                          deadlineDateTime: finalDateTime,
+                          priority: selectedPriority,
+                          projectId: projectId,
+                          checklist: checklist,
+                          isCompleted: task?.isCompleted ?? false,
+                          completedAt: task?.completedAt,
+                        ),
+                      );
                       Navigator.pop(context);
                     },
-                    child: Text(isEdit ? 'CẬP NHẬT' : 'TẠO MỚI', style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
+                    child: Text(
+                      isEdit ? 'CẬP NHẬT' : 'TẠO MỚI',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 30),
@@ -290,46 +415,91 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setST) => AlertDialog(
           backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text('DỰ ÁN MỚI', style: TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 2)),
+          title: const Text(
+            'DỰ ÁN MỚI',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              letterSpacing: 2,
+            ),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: controller,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(hintText: 'Tên dự án', hintStyle: TextStyle(color: Colors.white24)),
+                decoration: const InputDecoration(
+                  hintText: 'Tên dự án',
+                  hintStyle: TextStyle(color: Colors.white24),
+                ),
               ),
               const SizedBox(height: 20),
               Wrap(
                 spacing: 10,
-                children: [Colors.blue, Colors.red, Colors.green, Colors.orange, Colors.purple].map((c) => GestureDetector(
-                  onTap: () => setST(() => selectedColor = c),
-                  child: Container(
-                    width: 30, height: 30,
-                    decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: selectedColor == c ? Colors.white : Colors.transparent, width: 2)),
-                  ),
-                )).toList(),
-              )
+                children:
+                    [
+                          Colors.blue,
+                          Colors.red,
+                          Colors.green,
+                          Colors.orange,
+                          Colors.purple,
+                        ]
+                        .map(
+                          (c) => GestureDetector(
+                            onTap: () => setST(() => selectedColor = c),
+                            child: Container(
+                              width: 30,
+                              height: 30,
+                              decoration: BoxDecoration(
+                                color: c,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: selectedColor == c
+                                      ? Colors.white
+                                      : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+              ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('HỦY')),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('HỦY'),
+            ),
             ElevatedButton(
               onPressed: () {
                 if (controller.text.isNotEmpty) {
-                  _firestore.collection('projects').add(Project(name: controller.text, colorValue: selectedColor.value).toJson());
+                  _firestore
+                      .collection('projects')
+                      .add(
+                        Project(
+                          name: controller.text,
+                          colorValue: selectedColor.value,
+                        ).toJson(),
+                      );
                   Navigator.pop(context);
                 }
               },
               child: const Text('TẠO'),
-            )
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDigitalPicker(FixedExtentScrollController ctrl, int count, Function(int) onSelected) {
+  Widget _buildDigitalPicker(
+    FixedExtentScrollController ctrl,
+    int count,
+    Function(int) onSelected,
+  ) {
     return SizedBox(
       width: 70,
       height: 100,
@@ -349,7 +519,15 @@ class _HomeScreenState extends State<HomeScreen> {
               color: Colors.white.withOpacity(0.05),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(index.toString().padLeft(2, '0'), style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+            child: Text(
+              index.toString().padLeft(2, '0'),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+              ),
+            ),
           ),
         ),
       ),
@@ -358,11 +536,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredTasks = _tasks.where((t) => 
-      t.title.toLowerCase().contains(_searchQuery.toLowerCase()) && 
-      (_selectedProjectId == null || t.projectId == _selectedProjectId) &&
-      !t.isCompleted
-    ).toList();
+    final filteredTasks = _tasks
+        .where(
+          (t) =>
+              t.title.toLowerCase().contains(_searchQuery.toLowerCase()) &&
+              (_selectedProjectId == null ||
+                  t.projectId == _selectedProjectId) &&
+              !t.isCompleted,
+        )
+        .toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F0F),
@@ -374,7 +556,15 @@ class _HomeScreenState extends State<HomeScreen> {
             pinned: true,
             backgroundColor: const Color(0xFF0F0F0F),
             flexibleSpace: const FlexibleSpaceBar(
-              title: Text('WORKSPACE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 3, fontSize: 16)),
+              title: Text(
+                'WORKSPACE',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 3,
+                  fontSize: 16,
+                ),
+              ),
               centerTitle: false,
             ),
           ),
@@ -382,43 +572,73 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   child: TextField(
                     onChanged: (v) => setState(() => _searchQuery = v),
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       hintText: 'Tìm kiếm...',
                       hintStyle: const TextStyle(color: Colors.white24),
-                      prefixIcon: const Icon(Icons.search, color: Colors.white24, size: 20),
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        color: Colors.white24,
+                        size: 20,
+                      ),
                       filled: true,
                       fillColor: const Color(0xFF1A1A1A),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(15),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
                   ),
                 ),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   child: Row(
                     children: [
                       ChoiceChip(
-                        label: const Text('ALL', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                        label: const Text(
+                          'ALL',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         selected: _selectedProjectId == null,
-                        onSelected: (s) => setState(() => _selectedProjectId = null),
+                        onSelected: (s) =>
+                            setState(() => _selectedProjectId = null),
                         selectedColor: Colors.blueAccent,
                         backgroundColor: const Color(0xFF1A1A1A),
                       ),
                       const SizedBox(width: 8),
-                      ..._projects.map((p) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(p.name.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                          selected: _selectedProjectId == p.id,
-                          onSelected: (s) => setState(() => _selectedProjectId = s ? p.id : null),
-                          selectedColor: Color(p.colorValue),
-                          backgroundColor: const Color(0xFF1A1A1A),
+                      ..._projects.map(
+                        (p) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(
+                              p.name.toUpperCase(),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            selected: _selectedProjectId == p.id,
+                            onSelected: (s) => setState(
+                              () => _selectedProjectId = s ? p.id : null,
+                            ),
+                            selectedColor: Color(p.colorValue),
+                            backgroundColor: const Color(0xFF1A1A1A),
+                          ),
                         ),
-                      )),
+                      ),
                     ],
                   ),
                 ),
@@ -434,15 +654,34 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.done_all, size: 64, color: Colors.white.withOpacity(0.05)),
+                      Icon(
+                        Icons.done_all,
+                        size: 64,
+                        color: Colors.white.withOpacity(0.05),
+                      ),
                       const SizedBox(height: 16),
-                      const Text('TẤT CẢ ĐÃ XONG!', style: TextStyle(color: Colors.white24, letterSpacing: 2, fontSize: 12)),
+                      const Text(
+                        'TẤT CẢ ĐÃ XONG!',
+                        style: TextStyle(
+                          color: Colors.white24,
+                          letterSpacing: 2,
+                          fontSize: 12,
+                        ),
+                      ),
                     ],
                   ),
                 ),
               )
             else
-              SliverList(delegate: SliverChildBuilderDelegate((context, index) => _buildTaskItem(filteredTasks[index]).animate().fadeIn(delay: (index * 50).ms).slideX(begin: 0.1, end: 0), childCount: filteredTasks.length)),
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => _buildTaskItem(filteredTasks[index])
+                      .animate()
+                      .fadeIn(delay: (index * 50).ms)
+                      .slideX(begin: 0.1, end: 0),
+                  childCount: filteredTasks.length,
+                ),
+              ),
           ],
           const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
@@ -464,16 +703,23 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           height: 80,
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
       ),
     );
   }
 
   Widget _buildTaskItem(Task t) {
-    final isOverdue = t.deadlineDateTime.isBefore(DateTime.now()) && !t.isCompleted;
-    final project = _projects.firstWhere((p) => p.id == t.projectId, orElse: () => Project(name: '', colorValue: Colors.transparent.value));
-    
+    final isOverdue =
+        t.deadlineDateTime.isBefore(DateTime.now()) && !t.isCompleted;
+    final project = _projects.firstWhere(
+      (p) => p.id == t.projectId,
+      orElse: () => Project(name: '', colorValue: Colors.transparent.value),
+    );
+
     int doneItems = t.checklist.where((e) => e.isDone).length;
     int totalItems = t.checklist.length;
 
@@ -482,7 +728,11 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: isOverdue ? Colors.redAccent.withOpacity(0.2) : Colors.transparent),
+        border: Border.all(
+          color: isOverdue
+              ? Colors.redAccent.withOpacity(0.2)
+              : Colors.transparent,
+        ),
       ),
       child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -491,33 +741,83 @@ class _HomeScreenState extends State<HomeScreen> {
         leading: GestureDetector(
           onTap: () => _toggleTask(t),
           child: Container(
-            width: 24, height: 24,
+            width: 24,
+            height: 24,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: t.isCompleted ? Colors.blueAccent : Colors.white24, width: 2),
+              border: Border.all(
+                color: t.isCompleted ? Colors.blueAccent : Colors.white24,
+                width: 2,
+              ),
               color: t.isCompleted ? Colors.blueAccent : Colors.transparent,
             ),
-            child: t.isCompleted ? const Icon(Icons.check, size: 14, color: Colors.black) : null,
+            child: t.isCompleted
+                ? const Icon(Icons.check, size: 14, color: Colors.black)
+                : null,
           ),
         ),
-        title: Text(t.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text(
+          t.title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         subtitle: Row(
           children: [
             if (t.projectId != null) ...[
-              Container(width: 8, height: 8, decoration: BoxDecoration(color: Color(project.colorValue), shape: BoxShape.circle)),
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: Color(project.colorValue),
+                  shape: BoxShape.circle,
+                ),
+              ),
               const SizedBox(width: 4),
-              Text(project.name.toUpperCase(), style: TextStyle(color: Color(project.colorValue).withOpacity(0.7), fontSize: 8, fontWeight: FontWeight.bold)),
+              Text(
+                project.name.toUpperCase(),
+                style: TextStyle(
+                  color: Color(project.colorValue).withOpacity(0.7),
+                  fontSize: 8,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(width: 12),
             ],
-            Icon(Icons.access_time, size: 12, color: isOverdue ? Colors.redAccent : Colors.white38),
+            Icon(
+              Icons.access_time,
+              size: 12,
+              color: isOverdue ? Colors.redAccent : Colors.white38,
+            ),
             const SizedBox(width: 4),
-            Text(DateFormat('dd/MM HH:mm').format(t.deadlineDateTime), style: TextStyle(color: isOverdue ? Colors.redAccent : Colors.white38, fontSize: 12)),
+            Text(
+              DateFormat('dd/MM HH:mm').format(t.deadlineDateTime),
+              style: TextStyle(
+                color: isOverdue ? Colors.redAccent : Colors.white38,
+                fontSize: 12,
+              ),
+            ),
             if (totalItems > 0) ...[
               const SizedBox(width: 12),
-              Icon(Icons.checklist, size: 12, color: doneItems == totalItems ? Colors.greenAccent : Colors.white38),
+              Icon(
+                Icons.checklist,
+                size: 12,
+                color: doneItems == totalItems
+                    ? Colors.greenAccent
+                    : Colors.white38,
+              ),
               const SizedBox(width: 4),
-              Text('$doneItems/$totalItems', style: TextStyle(color: doneItems == totalItems ? Colors.greenAccent : Colors.white38, fontSize: 10)),
-            ]
+              Text(
+                '$doneItems/$totalItems',
+                style: TextStyle(
+                  color: doneItems == totalItems
+                      ? Colors.greenAccent
+                      : Colors.white38,
+                  fontSize: 10,
+                ),
+              ),
+            ],
           ],
         ),
         children: [
@@ -525,22 +825,45 @@ class _HomeScreenState extends State<HomeScreen> {
             Padding(
               padding: const EdgeInsets.only(left: 56, right: 16, bottom: 16),
               child: Column(
-                children: t.checklist.map((item) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: InkWell(
-                    onTap: () {
-                      item.isDone = !item.isDone;
-                      _saveTask(t);
-                    },
-                    child: Row(
-                      children: [
-                        Icon(item.isDone ? Icons.check_circle : Icons.radio_button_unchecked, size: 14, color: item.isDone ? Colors.blueAccent : Colors.white24),
-                        const SizedBox(width: 8),
-                        Text(item.title, style: TextStyle(color: item.isDone ? Colors.white24 : Colors.white70, fontSize: 13, decoration: item.isDone ? TextDecoration.lineThrough : null)),
-                      ],
-                    ),
-                  ),
-                )).toList(),
+                children: t.checklist
+                    .map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: InkWell(
+                          onTap: () {
+                            item.isDone = !item.isDone;
+                            _saveTask(t);
+                          },
+                          child: Row(
+                            children: [
+                              Icon(
+                                item.isDone
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                                size: 14,
+                                color: item.isDone
+                                    ? Colors.blueAccent
+                                    : Colors.white24,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                item.title,
+                                style: TextStyle(
+                                  color: item.isDone
+                                      ? Colors.white24
+                                      : Colors.white70,
+                                  fontSize: 13,
+                                  decoration: item.isDone
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
               ),
             ),
           Padding(
@@ -548,10 +871,16 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(onPressed: () => _showTaskDialog(task: t), child: const Text('CHỈNH SỬA', style: TextStyle(fontSize: 10))),
+                TextButton(
+                  onPressed: () => _showTaskDialog(task: t),
+                  child: const Text(
+                    'CHỈNH SỬA',
+                    style: TextStyle(fontSize: 10),
+                  ),
+                ),
               ],
             ),
-          )
+          ),
         ],
       ),
     );

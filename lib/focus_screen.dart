@@ -20,25 +20,25 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
   late FixedExtentScrollController _hourController;
   late FixedExtentScrollController _minController;
   final AudioPlayer _audioPlayer = AudioPlayer();
-  
+
   int _workHours = 0;
-  int _workMinutes = 0; 
+  int _workMinutes = 0;
   int _remainingSeconds = 0;
-  
+
   bool _isRunning = false;
-  bool _isWorkMode = true; 
+  bool _isWorkMode = true;
   bool _isDeepFocus = false;
-  
+
   String _selectedAlarm = 'Default';
   final List<String> _alarms = ['Default', 'Piano', 'Zen', 'Nature'];
 
   int _totalFocusMinutes = 0;
   int _currentStreak = 0;
   Task? _selectedTask;
-  List<Task> _pendingTasks = [];
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
 
   @override
   void initState() {
@@ -66,10 +66,15 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _loadPendingTasks() async {
-    final snapshot = await _firestore.collection('tasks').where('isCompleted', isEqualTo: false).get();
+    final snapshot = await _firestore
+        .collection('tasks')
+        .where('isCompleted', isEqualTo: false)
+        .get();
     if (mounted) {
       setState(() {
-        _pendingTasks = snapshot.docs.map((doc) => Task.fromFirestore(doc.data(), doc.id)).toList();
+        _pendingTasks = snapshot.docs
+            .map((doc) => Task.fromFirestore(doc.data(), doc.id))
+            .toList();
       });
     }
   }
@@ -89,25 +94,33 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
 
     int streak = 0;
     DateTime checkDate = now;
-    if (!activeDays.contains(todayStr)) checkDate = now.subtract(const Duration(days: 1));
+    if (!activeDays.contains(todayStr))
+      checkDate = now.subtract(const Duration(days: 1));
     while (activeDays.contains(DateFormat('yyyy-MM-dd').format(checkDate))) {
       streak++;
       checkDate = checkDate.subtract(const Duration(days: 1));
     }
-    
-    if (mounted) setState(() { _totalFocusMinutes = total; _currentStreak = streak; });
+
+    if (mounted)
+      setState(() {
+        _totalFocusMinutes = total;
+        _currentStreak = streak;
+      });
   }
 
   Future<void> _initializeNotifications() async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const ios = DarwinInitializationSettings();
-    await _notifications.initialize(const InitializationSettings(android: android, iOS: ios));
+    await _notifications.initialize(
+      const InitializationSettings(android: android, iOS: ios),
+    );
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (_isRunning && _isWorkMode && _isDeepFocus) {
-      if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      if (state == AppLifecycleState.paused ||
+          state == AppLifecycleState.inactive) {
         _handleDeepFocusViolation();
       }
     }
@@ -115,20 +128,34 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
 
   void _handleDeepFocusViolation() async {
     Vibration.vibrate(pattern: [0, 500, 200, 500, 200, 500]);
-    const details = NotificationDetails(android: AndroidNotificationDetails('focus_violation', 'Deep Focus', importance: Importance.max, priority: Priority.high));
-    await _notifications.show(888, '⚠️ VI PHẠM TẬP TRUNG!', 'Quay lại app ngay để tiếp tục phiên làm việc.', details);
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'focus_violation',
+        'Deep Focus',
+        importance: Importance.max,
+        priority: Priority.high,
+      ),
+    );
+    await _notifications.show(
+      888,
+      '⚠️ VI PHẠM TẬP TRUNG!',
+      'Quay lại app ngay để tiếp tục phiên làm việc.',
+      details,
+    );
   }
 
   Timer? _timer;
   void _startTimer() {
     if (_remainingSeconds <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn thời gian!')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vui lòng chọn thời gian!')));
       return;
     }
     if (_timer != null) return;
     setState(() => _isRunning = true);
     if (_isWorkMode) _playMusic();
-    
+
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {
@@ -145,7 +172,11 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
   void _playMusic() async {
     try {
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.play(UrlSource('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'));
+      await _audioPlayer.play(
+        UrlSource(
+          'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+        ),
+      );
     } catch (e) {
       debugPrint('Lỗi nhạc: $e');
     }
@@ -157,7 +188,7 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     _isRunning = false;
     _audioPlayer.stop();
     _playAlarm();
-    
+
     if (_isWorkMode) {
       int duration = (_workHours * 60) + _workMinutes;
       _saveSession(duration);
@@ -192,16 +223,40 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('TUYỆT VỜI 🏆', style: TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 2)),
-        content: Text('Bạn đã tập trung được $duration phút. Bạn đã hoàn thành nhiệm vụ này chưa?', style: const TextStyle(color: Colors.white70)),
+        title: const Text(
+          'TUYỆT VỜI 🏆',
+          style: TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 2),
+        ),
+        content: Text(
+          'Bạn đã tập trung được $duration phút. Bạn đã hoàn thành nhiệm vụ này chưa?',
+          style: const TextStyle(color: Colors.white70),
+        ),
         actions: [
-          TextButton(onPressed: () { Navigator.pop(context); _switchMode(); }, child: const Text('CHƯA XONG')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _switchMode();
+            },
+            child: const Text('CHƯA XONG'),
+          ),
           if (_selectedTask != null)
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.greenAccent, foregroundColor: Colors.black),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.greenAccent,
+                foregroundColor: Colors.black,
+              ),
               onPressed: () async {
-                await _firestore.collection('tasks').doc(_selectedTask!.id).update({'isCompleted': true, 'completedAt': FieldValue.serverTimestamp()});
-                await _firestore.collection('user_profile').doc('default_user').update({'coins': FieldValue.increment(10)});
+                await _firestore
+                    .collection('tasks')
+                    .doc(_selectedTask!.id)
+                    .update({
+                      'isCompleted': true,
+                      'completedAt': FieldValue.serverTimestamp(),
+                    });
+                await _firestore
+                    .collection('user_profile')
+                    .doc('default_user')
+                    .update({'coins': FieldValue.increment(10)});
                 Navigator.pop(context);
                 _switchMode();
                 _loadData();
@@ -213,9 +268,15 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _pauseTimer() { _timer?.cancel(); _timer = null; setState(() => _isRunning = false); _audioPlayer.stop(); }
-  void _resetTimer() { 
-    _pauseTimer(); 
+  void _pauseTimer() {
+    _timer?.cancel();
+    _timer = null;
+    setState(() => _isRunning = false);
+    _audioPlayer.stop();
+  }
+
+  void _resetTimer() {
+    _pauseTimer();
     setState(() {
       _workHours = 0;
       _workMinutes = 0;
@@ -224,11 +285,13 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       _minController.jumpToItem(0);
     });
   }
-  void _switchMode() { 
-    _isWorkMode = !_isWorkMode; 
+
+  void _switchMode() {
+    _isWorkMode = !_isWorkMode;
     _pauseTimer();
     setState(() {
-      _remainingSeconds = (_isWorkMode ? (_workHours * 60 + _workMinutes) : 5) * 60;
+      _remainingSeconds =
+          (_isWorkMode ? (_workHours * 60 + _workMinutes) : 5) * 60;
     });
   }
 
@@ -237,9 +300,23 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('HẾT GIỜ NGHỈ!', style: TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 2)),
-        content: const Text('Sẵn sàng quay lại làm việc chưa?', style: TextStyle(color: Colors.white70)),
-        actions: [TextButton(onPressed: () { Navigator.pop(context); _switchMode(); }, child: const Text('BẮT ĐẦU'))],
+        title: const Text(
+          'HẾT GIỜ NGHỈ!',
+          style: TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 2),
+        ),
+        content: const Text(
+          'Sẵn sàng quay lại làm việc chưa?',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _switchMode();
+            },
+            child: const Text('BẮT ĐẦU'),
+          ),
+        ],
       ),
     );
   }
@@ -283,16 +360,36 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.all(20),
-      child: Text(_isWorkMode ? 'FOCUS SESSION' : 'REST TIME', style: TextStyle(color: _isWorkMode ? Colors.redAccent : Colors.tealAccent, letterSpacing: 4, fontWeight: FontWeight.w900, fontSize: 12)),
+      child: Text(
+        _isWorkMode ? 'FOCUS SESSION' : 'REST TIME',
+        style: TextStyle(
+          color: _isWorkMode ? Colors.redAccent : Colors.tealAccent,
+          letterSpacing: 4,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
     );
   }
 
   Widget _buildStreakCounter() {
     return Column(
       children: [
-        const Icon(Icons.local_fire_department, color: Colors.orange, size: 40).animate(onPlay: (c) => c.repeat()).shimmer(duration: 2.seconds),
+        const Icon(
+          Icons.local_fire_department,
+          color: Colors.orange,
+          size: 40,
+        ).animate(onPlay: (c) => c.repeat()).shimmer(duration: 2.seconds),
         const SizedBox(height: 8),
-        Text('$_currentStreak DAY STREAK', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1)),
+        Text(
+          '$_currentStreak DAY STREAK',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            letterSpacing: 1,
+          ),
+        ),
       ],
     );
   }
@@ -303,14 +400,20 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       int hours = totalSeconds ~/ 3600;
       int minutes = (totalSeconds % 3600) ~/ 60;
       int seconds = totalSeconds % 60;
-      
+
       return Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           _buildTimeTile(hours.toString().padLeft(2, '0'), active: true),
-          const Text(':', style: TextStyle(color: Colors.white10, fontSize: 30)),
+          const Text(
+            ':',
+            style: TextStyle(color: Colors.white10, fontSize: 30),
+          ),
           _buildTimeTile(minutes.toString().padLeft(2, '0'), active: true),
-          const Text(':', style: TextStyle(color: Colors.white10, fontSize: 30)),
+          const Text(
+            ':',
+            style: TextStyle(color: Colors.white10, fontSize: 30),
+          ),
           _buildTimeTile(seconds.toString().padLeft(2, '0'), active: true),
         ],
       );
@@ -318,15 +421,36 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       return Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _buildWheelPicker(_hourController, 24, 'H', (v) => setState(() { _workHours = v; _remainingSeconds = (_workHours * 3600 + _workMinutes * 60); })),
+          _buildWheelPicker(
+            _hourController,
+            24,
+            'H',
+            (v) => setState(() {
+              _workHours = v;
+              _remainingSeconds = (_workHours * 3600 + _workMinutes * 60);
+            }),
+          ),
           const SizedBox(width: 10),
-          _buildWheelPicker(_minController, 60, 'M', (v) => setState(() { _workMinutes = v; _remainingSeconds = (_workHours * 3600 + _workMinutes * 60); })),
+          _buildWheelPicker(
+            _minController,
+            60,
+            'M',
+            (v) => setState(() {
+              _workMinutes = v;
+              _remainingSeconds = (_workHours * 3600 + _workMinutes * 60);
+            }),
+          ),
         ],
       );
     }
   }
 
-  Widget _buildWheelPicker(FixedExtentScrollController ctrl, int count, String label, Function(int) onSelected) {
+  Widget _buildWheelPicker(
+    FixedExtentScrollController ctrl,
+    int count,
+    String label,
+    Function(int) onSelected,
+  ) {
     return SizedBox(
       width: 100,
       height: 150,
@@ -343,10 +467,24 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
             },
             childDelegate: ListWheelChildBuilderDelegate(
               childCount: count,
-              builder: (context, index) => _buildTimeTile(index.toString().padLeft(2, '0'), active: true),
+              builder: (context, index) => _buildTimeTile(
+                index.toString().padLeft(2, '0'),
+                active: true,
+              ),
             ),
           ),
-          Positioned(right: 10, bottom: 40, child: Text(label, style: const TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.bold))),
+          Positioned(
+            right: 10,
+            bottom: 40,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white24,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -360,9 +498,19 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: active ? Colors.white.withOpacity(0.1) : Colors.transparent),
+        border: Border.all(
+          color: active ? Colors.white.withOpacity(0.1) : Colors.transparent,
+        ),
       ),
-      child: Text(value, style: TextStyle(color: active ? Colors.white : Colors.white10, fontSize: 40, fontWeight: FontWeight.w200, fontFamily: 'monospace')),
+      child: Text(
+        value,
+        style: TextStyle(
+          color: active ? Colors.white : Colors.white10,
+          fontSize: 40,
+          fontWeight: FontWeight.w200,
+          fontFamily: 'monospace',
+        ),
+      ),
     );
   }
 
@@ -372,12 +520,24 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text('ALARM SOUND', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+          const Text(
+            'ALARM SOUND',
+            style: TextStyle(
+              color: Colors.white38,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1,
+            ),
+          ),
           DropdownButton<String>(
             value: _selectedAlarm,
             dropdownColor: const Color(0xFF1A1A1A),
             underline: const SizedBox(),
-            style: const TextStyle(color: Colors.blueAccent, fontSize: 12, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              color: Colors.blueAccent,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
             items: _alarms.map((String value) {
               return DropdownMenuItem<String>(value: value, child: Text(value));
             }).toList(),
@@ -397,23 +557,37 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: _isDeepFocus ? Colors.redAccent.withOpacity(0.1) : Colors.white.withOpacity(0.05),
+          color: _isDeepFocus
+              ? Colors.redAccent.withOpacity(0.1)
+              : Colors.white.withOpacity(0.05),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _isDeepFocus ? Colors.redAccent : Colors.transparent),
+          border: Border.all(
+            color: _isDeepFocus ? Colors.redAccent : Colors.transparent,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.lock_clock, size: 14, color: _isDeepFocus ? Colors.redAccent : Colors.white38),
+            Icon(
+              Icons.lock_clock,
+              size: 14,
+              color: _isDeepFocus ? Colors.redAccent : Colors.white38,
+            ),
             const SizedBox(width: 8),
-            Text('DEEP FOCUS MODE', style: TextStyle(color: _isDeepFocus ? Colors.redAccent : Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+            Text(
+              'DEEP FOCUS MODE',
+              style: TextStyle(
+                color: _isDeepFocus ? Colors.redAccent : Colors.white38,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1,
+              ),
+            ),
           ],
         ),
       ),
     );
   }
-
-
 
   Widget _buildActionButtons() {
     return Row(
@@ -429,9 +603,19 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
             decoration: BoxDecoration(
               color: Colors.white,
               shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: Colors.white.withOpacity(0.2), blurRadius: 40, spreadRadius: 5)],
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.white.withOpacity(0.2),
+                  blurRadius: 40,
+                  spreadRadius: 5,
+                ),
+              ],
             ),
-            child: Icon(_isRunning ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.black, size: 50),
+            child: Icon(
+              _isRunning ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              color: Colors.black,
+              size: 50,
+            ),
           ),
         ),
         const SizedBox(width: 40),
@@ -445,7 +629,10 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), shape: BoxShape.circle),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          shape: BoxShape.circle,
+        ),
         child: Icon(icon, color: Colors.white, size: 28),
       ),
     );
@@ -459,8 +646,19 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('TODAY FOCUS', style: TextStyle(color: Colors.white10, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-              Text('${_totalFocusMinutes}m / 120m', style: const TextStyle(color: Colors.white30, fontSize: 10)),
+              const Text(
+                'TODAY FOCUS',
+                style: TextStyle(
+                  color: Colors.white10,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+              Text(
+                '${_totalFocusMinutes}m / 120m',
+                style: const TextStyle(color: Colors.white30, fontSize: 10),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -470,7 +668,9 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
               value: (_totalFocusMinutes / 120).clamp(0, 1),
               minHeight: 4,
               backgroundColor: Colors.white.withOpacity(0.05),
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                Colors.blueAccent,
+              ),
             ),
           ),
         ],
