@@ -1,10 +1,13 @@
-import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:table_calendar/table_calendar.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'models.dart';
+// Import các thư viện cần thiết
+import 'dart:async'; // Bất đồng bộ
+import 'package:flutter/material.dart'; // Flutter UI
+import 'package:table_calendar/table_calendar.dart'; // Widget lịch
+import 'package:cloud_firestore/cloud_firestore.dart'; // Firebase Firestore
+import 'package:flutter_animate/flutter_animate.dart'; // Hiệu ứng animation
+import 'models.dart'; // Models
 
+/// Màn hình lịch - Hiển thị nhiệm vụ theo ngày
+/// Bao gồm: Calendar view, timeline view, quick edit
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
 
@@ -13,16 +16,23 @@ class ScheduleScreen extends StatefulWidget {
 }
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
-  CalendarFormat _calendarFormat = CalendarFormat.month;
-  DateTime _focusedDay = DateTime.now();
-  DateTime? _selectedDay;
+  // Cài đặt hiển thị của lịch
+  CalendarFormat _calendarFormat = CalendarFormat.month; // Month/Week view
+  DateTime _focusedDay = DateTime.now(); // Ngày đang focus
+  DateTime? _selectedDay; // Ngày được chọn
+  
+  // Kết nối Firebase và subscriptions
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   StreamSubscription<QuerySnapshot>? _tasksSubscription;
   StreamSubscription<QuerySnapshot>? _projectsSubscription;
-  List<Task> _allTasks = [];
-  List<Project> _projects = [];
-  bool _isLoading = true;
-  bool _colorByProject = false;
+  
+  // Dữ liệu
+  List<Task> _allTasks = []; // Tất cả tasks
+  List<Project> _projects = []; // Tất cả projects
+  
+  // Trạng thái
+  bool _isLoading = true; // Đang tải dữ liệu
+  bool _colorByProject = false; // Màu theo project (false = theo priority)
 
   @override
   void initState() {

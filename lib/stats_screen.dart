@@ -1,9 +1,12 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import 'completed_tasks_screen.dart';
+// Import các thư viện cần thiết
+import 'package:cloud_firestore/cloud_firestore.dart'; // Firebase Firestore
+import 'package:fl_chart/fl_chart.dart'; // Biểu đồ
+import 'package:flutter/material.dart'; // Flutter UI
+import 'package:intl/intl.dart'; // Định dạng ngày tháng
+import 'completed_tasks_screen.dart'; // Màn hình lịch sử
 
+/// Màn hình thống kê - Hiển thị tất cả số liệu và biểu đồ
+/// Bao gồm: Productivity score, charts, streak, coins, best focus time
 class StatsScreen extends StatefulWidget {
   const StatsScreen({super.key});
 
@@ -14,19 +17,20 @@ class StatsScreen extends StatefulWidget {
 class _StatsScreenState extends State<StatsScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  int _totalFocusMinutes = 0;
-  int _completedTasksCount = 0;
-  int _currentStreak = 0;
-  int _coins = 0;
-  int _streakFreezes = 0;
-  int _pendingTasksCount = 0;
-  int _overdueTasksCount = 0;
-  double _productivityScore = 0;
-  Map<int, int> _hourlyFocusData = {};
+  // Các biến thống kê
+  int _totalFocusMinutes = 0;      // Tổng phút tập trung
+  int _completedTasksCount = 0;    // Số nhiệm vụ đã hoàn thành
+  int _currentStreak = 0;          // Chuỗi ngày liên tục
+  int _coins = 0;                  // Số xu hiện tại
+  int _streakFreezes = 0;          // Số lần đông băng
+  int _pendingTasksCount = 0;      // Nhiệm vụ chưa xong
+  int _overdueTasksCount = 0;      // Nhiệm vụ quá hạn
+  double _productivityScore = 0;   // Điểm hiệu suất (0-100)
+  Map<int, int> _hourlyFocusData = {}; // Phân tích theo giờ
 
-  Map<String, int> _weeklyData = {};
-  bool _isLoading = true;
-  String _viewMode = 'week'; // 'week', 'month', 'quarter'
+  Map<String, int> _weeklyData = {}; // Dữ liệu biểu đồ theo tuần
+  bool _isLoading = true;          // Đang tải dữ liệu
+  String _viewMode = 'week';       // Chế độ xem: 'week', 'month', 'quarter'
 
   @override
   void initState() {

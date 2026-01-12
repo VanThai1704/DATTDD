@@ -1,15 +1,18 @@
-import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:shimmer/shimmer.dart';
-import 'package:vibration/vibration.dart';
-import 'package:flutter/services.dart';
-import 'models.dart';
-import 'notification_service.dart';
+// Import các thư viện cần thiết
+import 'dart:async'; // Bất đồng bộ và Stream
+import 'package:cloud_firestore/cloud_firestore.dart'; // Firebase Firestore
+import 'package:firebase_core/firebase_core.dart'; // Firebase Core
+import 'package:flutter/material.dart'; // Flutter UI
+import 'package:intl/intl.dart'; // Định dạng ngày tháng
+import 'package:flutter_animate/flutter_animate.dart'; // Hiệu ứng animation
+import 'package:shimmer/shimmer.dart'; // Hiệu ứng shimmer loading
+import 'package:vibration/vibration.dart'; // Rung điện thoại
+import 'package:flutter/services.dart'; // Dịch vụ hệ thống
+import 'models.dart'; // Các model dữ liệu
+import 'notification_service.dart'; // Dịch vụ thông báo
 
+/// Màn hình chính - Quản lý nhiệm vụ
+/// Bao gồm: CRUD tasks, tìm kiếm, lọc, tags, recurring tasks
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -18,49 +21,66 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // Kết nối Firebase Firestore
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
+  // Subscriptions để lắng nghe thay đổi từ Firebase
   StreamSubscription<QuerySnapshot>? _tasksSubscription;
   StreamSubscription<QuerySnapshot>? _projectsSubscription;
-  final List<Task> _tasks = [];
-  final List<Project> _projects = [];
-  bool _isLoading = true;
-  bool _isDisposed = false;
-  String _searchQuery = '';
-  String? _selectedProjectId;
-  String? _selectedTag;
+  
+  // Danh sách dữ liệu
+  final List<Task> _tasks = []; // Danh sách nhiệm vụ
+  final List<Project> _projects = []; // Danh sách dự án
+  
+  // Trạng thái
+  bool _isLoading = true; // Đang tải dữ liệu
+  bool _isDisposed = false; // Widget đã bị hủy chưa
+  
+  // Tìm kiếm và lọc
+  String _searchQuery = ''; // Từ khóa tìm kiếm
+  String? _selectedProjectId; // Dự án đang chọn
+  String? _selectedTag; // Tag đang chọn
   final TextEditingController _searchController = TextEditingController();
-  bool _showCompletedTasks = false;
+  bool _showCompletedTasks = false; // Hiển thị tasks đã hoàn thành
 
+  /// Khởi tạo khi widget được tạo
   @override
   void initState() {
     super.initState();
     _init();
   }
 
+  /// Khởi tạo Firebase và thiết lập listeners
   Future<void> _init() async {
     if (Firebase.apps.isEmpty) await Firebase.initializeApp();
     _setupFirestoreListeners();
   }
 
+  /// Dọn dẹp khi widget bị hủy
   @override
   void dispose() {
     _isDisposed = true;
-    _tasksSubscription?.cancel();
-    _projectsSubscription?.cancel();
+    _tasksSubscription?.cancel(); // Hủy subscription tasks
+    _projectsSubscription?.cancel(); // Hủy subscription projects
     _searchController.dispose();
     super.dispose();
   }
 
+  /// Thiết lập listeners để lắng nghe thay đổi real-time từ Firebase
   void _setupFirestoreListeners() {
+    // Lắng nghe thay đổi của tasks
     _tasksSubscription?.cancel();
     _tasksSubscription = _firestore.collection('tasks').snapshots().listen((
       snapshot,
     ) {
-      if (_isDisposed) return;
+      if (_isDisposed) return; // Không cập nhật nếu widget đã bị hủy
+      
+      // Chuyển dữ liệu Firestore thành danh sách Task
       final newTasks = snapshot.docs
           .map((doc) => Task.fromFirestore(doc.data(), doc.id))
           .toList();
 
+      // Sắp xếp: Priority trước, sau đó theo deadline
       newTasks.sort((a, b) {
         if (a.priority != b.priority)
           return b.priority.index.compareTo(a.priority.index);

@@ -1,14 +1,17 @@
-import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:vibration/vibration.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'models.dart';
-import 'package:intl/intl.dart';
+// Import các thư viện cần thiết
+import 'dart:async'; // Xử lý bất đồng bộ và Timer
+import 'package:cloud_firestore/cloud_firestore.dart'; // Firebase Firestore database
+import 'package:flutter/material.dart'; // Flutter UI framework
+import 'package:flutter/services.dart'; // Dịch vụ hệ thống (haptic feedback)
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // Thông báo local
+import 'package:vibration/vibration.dart'; // Rung điện thoại
+import 'package:flutter_animate/flutter_animate.dart'; // Hiệu ứng animation
+import 'package:audioplayers/audioplayers.dart'; // Phát nhạc và âm thanh
+import 'models.dart'; // Các model dữ liệu
+import 'package:intl/intl.dart'; // Định dạng ngày tháng
 
+/// Màn hình Focus Session - nơi người dùng tập trung làm việc
+/// Bao gồm timer, âm thanh, theo dõi tiến độ và nhiều tính năng khác
 class FocusScreen extends StatefulWidget {
   const FocusScreen({super.key});
 
@@ -17,18 +20,24 @@ class FocusScreen extends StatefulWidget {
 }
 
 class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
+  // Controllers cho wheel picker chọn giờ và phút
   late FixedExtentScrollController _hourController;
   late FixedExtentScrollController _minController;
+  
+  // Audio player để phát nhạc nền và âm báo
   final AudioPlayer _audioPlayer = AudioPlayer();
 
-  int _workHours = 0;
-  int _workMinutes = 0;
-  int _remainingSeconds = 0;
+  // Thời gian làm việc đã chọn
+  int _workHours = 0; // Số giờ
+  int _workMinutes = 0; // Số phút
+  int _remainingSeconds = 0; // Số giây còn lại trong countdown
 
-  bool _isRunning = false;
-  bool _isWorkMode = true;
-  bool _isDeepFocus = false;
+  // Trạng thái của timer và chế độ
+  bool _isRunning = false; // Timer có đang chạy không
+  bool _isWorkMode = true; // Chế độ làm việc (true) hay nghỉ (false)
+  bool _isDeepFocus = false; // Chế độ tập trung sâu (cảnh báo khi rời app)
 
+  // Âm thanh báo thức khi hết giờ
   String _selectedAlarm = 'Default';
   final List<String> _alarms = [
     'Default',
@@ -38,51 +47,66 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     'Chimes',
     'Bell',
   ];
+  
+  // Tiếng ồn trắng (white noise) phát trong khi làm việc
   final List<String> _whitenoise = [
-    'None',
-    'Rain',
-    'Ocean',
-    'Forest',
-    'Fireplace',
-    'Cafe',
+    'None', // Không có
+    'Rain', // Tiếng mưa
+    'Ocean', // Tiếng sóng biển
+    'Forest', // Tiếng rừng
+    'Fireplace', // Tiếng lò sưởi
+    'Cafe', // Tiếng quán cafe
   ];
   String _selectedWhiteNoise = 'None';
 
-  int _totalFocusMinutes = 0;
-  int _currentStreak = 0;
-  Task? _selectedTask;
-  Project? _selectedProject;
-  List<Project> _projects = [];
+  // Thống kê và tiến độ
+  int _totalFocusMinutes = 0; // Tổng số phút tập trung hôm nay
+  int _currentStreak = 0; // Chuỗi ngày liên tục tập trung
+  Task? _selectedTask; // Nhiệm vụ đang làm (nếu có)
+  Project? _selectedProject; // Dự án đang làm (nếu có)
+  List<Project> _projects = []; // Danh sách tất cả dự án
 
+  // Kết nối Firebase và thông báo
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
+  /// Khởi tạo khi màn hình được tạo
   @override
   void initState() {
     super.initState();
+    // Khởi tạo controllers cho wheel picker
     _hourController = FixedExtentScrollController(initialItem: 0);
     _minController = FixedExtentScrollController(initialItem: 0);
+    
+    // Theo dõi lifecycle của app (để phát hiện khi user rời app trong Deep Focus)
     WidgetsBinding.instance.addObserver(this);
+    
+    // Khởi tạo hệ thống thông báo
     _initializeNotifications();
+    
+    // Tải dữ liệu từ Firebase
     _loadData();
   }
 
+  /// Dọn dẹp resources khi màn hình bị hủy
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _hourController.dispose();
     _minController.dispose();
-    _timer?.cancel();
-    _audioPlayer.dispose();
+    _timer?.cancel(); // Hủy timer nếu đang chạy
+    _audioPlayer.dispose(); // Dừng và giải phóng audio player
     super.dispose();
   }
 
+  /// Tải tất cả dữ liệu cần thiết
   Future<void> _loadData() async {
-    await _loadTodayStats();
-    await _loadProjects();
+    await _loadTodayStats(); // Tải thống kê hôm nay
+    await _loadProjects(); // Tải danh sách dự án
   }
 
+  /// Tải danh sách các dự án từ Firebase
   Future<void> _loadProjects() async {
     final snapshot = await _firestore.collection('projects').get();
     if (mounted) {
@@ -94,23 +118,32 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Tải thống kê hôm nay và tính streak
   Future<void> _loadTodayStats() async {
     final now = DateTime.now();
     final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    
+    // Lấy tất cả các phiên tập trung
     final focusSnapshot = await _firestore.collection('focus_sessions').get();
-    int total = 0;
-    Set<String> activeDays = {};
+    int total = 0; // Tổng phút tập trung hôm nay
+    Set<String> activeDays = {}; // Set các ngày đã có phiên tập trung
 
+    // Duyệt qua tất cả các phiên
     for (var doc in focusSnapshot.docs) {
       final data = doc.data();
+      // Tính tổng thời gian hôm nay
       if (data['date'] == todayStr) total += (data['duration'] as int? ?? 0);
+      // Lưu ngày có hoạt động
       if (data['date'] != null) activeDays.add(data['date']);
     }
 
+    // Tính streak (chuỗi ngày liên tục)
     int streak = 0;
     DateTime checkDate = now;
+    // Nếu hôm nay chưa có hoạt động, bắt đầu từ hôm qua
     if (!activeDays.contains(todayStr))
       checkDate = now.subtract(const Duration(days: 1));
+    // Đếm ngược từng ngày cho đến khi gặp ngày không có hoạt động
     while (activeDays.contains(DateFormat('yyyy-MM-dd').format(checkDate))) {
       streak++;
       checkDate = checkDate.subtract(const Duration(days: 1));
@@ -132,16 +165,21 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Theo dõi trạng thái lifecycle của app
+  /// Dùng để phát hiện khi user rời app trong chế độ Deep Focus
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Nếu đang chạy timer, ở chế độ làm việc và bật Deep Focus
     if (_isRunning && _isWorkMode && _isDeepFocus) {
+      // Khi app bị pause hoặc inactive (user rời app)
       if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.inactive) {
-        _handleDeepFocusViolation();
+        _handleDeepFocusViolation(); // Cảnh báo vi phạm
       }
     }
   }
 
+  /// Xử lý khi user vi phạm Deep Focus (rời app)
   void _handleDeepFocusViolation() async {
     Vibration.vibrate(pattern: [0, 500, 200, 500, 200, 500]);
     const details = NotificationDetails(
@@ -160,17 +198,20 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
-  Timer? _timer;
+  Timer? _timer; // Timer đếm ngược
+  
+  /// Bắt đầu đếm ngược
   void _startTimer() {
+    // Kiểm tra đã chọn thời gian chưa
     if (_remainingSeconds <= 0) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Vui lòng chọn thời gian!')));
       return;
     }
-    if (_timer != null) return;
+    if (_timer != null) return; // Tránh tạo nhiều timer
     setState(() => _isRunning = true);
-    if (_isWorkMode) _playMusic();
+    if (_isWorkMode) _playMusic(); // Phát nhạc nếu đang làm việc
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
@@ -198,20 +239,23 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Xử lý khi timer hoàn thành (hết giờ)
   void _completeTimer() {
-    _timer?.cancel();
+    _timer?.cancel(); // Hủy timer
     _timer = null;
     _isRunning = false;
-    _audioPlayer.stop();
-    _playAlarm();
+    _audioPlayer.stop(); // Dừng nhạc nền
+    _playAlarm(); // Phát âm báo
 
     if (_isWorkMode) {
+      // Nếu là chế độ làm việc
       int duration = (_workHours * 60) + _workMinutes;
-      _saveSession(duration);
-      Vibration.vibrate(pattern: [0, 300, 200, 300, 200, 500]);
-      _showCompletionDialog(duration);
+      _saveSession(duration); // Lưu phiên vào Firebase
+      Vibration.vibrate(pattern: [0, 300, 200, 300, 200, 500]); // Rung
+      _showCompletionDialog(duration); // Hiện dialog hoàn thành
     } else {
-      _showTimeUpDialog();
+      // Nếu là chế độ nghỉ
+      _showTimeUpDialog(); // Hiện dialog hết giờ nghỉ
     }
   }
 
@@ -289,12 +333,13 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Tạm dừng timer
   void _pauseTimer() {
     _timer?.cancel();
     _timer = null;
     setState(() => _isRunning = false);
-    _audioPlayer.stop();
-    _showPauseReasonDialog();
+    _audioPlayer.stop(); // Dừng nhạc
+    _showPauseReasonDialog(); // Hỏi lý do tạm dừng
   }
 
   void _showPauseReasonDialog() {
@@ -339,21 +384,25 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Reset timer về 0
   void _resetTimer() {
-    _pauseTimer();
+    _pauseTimer(); // Dừng timer trước
     setState(() {
       _workHours = 0;
       _workMinutes = 0;
       _remainingSeconds = 0;
+      // Reset wheel picker về 0
       _hourController.jumpToItem(0);
       _minController.jumpToItem(0);
     });
   }
 
+  /// Chuyển đổi giữa chế độ làm việc và nghỉ
   void _switchMode() {
-    _isWorkMode = !_isWorkMode;
-    _pauseTimer();
+    _isWorkMode = !_isWorkMode; // Toggle mode
+    _pauseTimer(); // Dừng timer hiện tại
     setState(() {
+      // Set thời gian mới: work time hoặc 5 phút nghỉ
       _remainingSeconds =
           (_isWorkMode ? (_workHours * 60 + _workMinutes) : 5) * 60;
     });
@@ -385,39 +434,40 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Build giao diện chính
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F0F),
+      backgroundColor: const Color(0xFF0F0F0F), // Màu nền tối
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(),
+            _buildHeader(), // Tiêu đề "FOCUS SESSION" / "REST TIME"
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const SizedBox(height: 20),
-                    _buildStreakCounter(),
+                    _buildStreakCounter(), // Hiển thị streak
                     const SizedBox(height: 30),
-                    if (!_isRunning) _buildPresetButtons(),
+                    if (!_isRunning) _buildPresetButtons(), // Nút preset thời gian
                     const SizedBox(height: 20),
-                    _buildClockDisplay(),
+                    _buildClockDisplay(), // Đồng hồ đếm ngược
                     const SizedBox(height: 30),
-                    _buildAlarmSelector(),
+                    _buildAlarmSelector(), // Chọn alarm và white noise
                     const SizedBox(height: 20),
-                    _buildProjectSelector(),
+                    _buildProjectSelector(), // Chọn dự án
                     const SizedBox(height: 20),
-                    _buildDeepFocusToggle(),
+                    _buildDeepFocusToggle(), // Toggle Deep Focus
                     const SizedBox(height: 20),
                   ],
                 ),
               ),
             ),
-            _buildActionButtons(),
+            _buildActionButtons(), // Các nút Play/Pause/Reset/Skip
             const SizedBox(height: 20),
-            _buildBottomStats(),
+            _buildBottomStats(), // Thanh progress hôm nay
             const SizedBox(height: 20),
           ],
         ),
@@ -425,6 +475,7 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Build header (tiêu đề màn hình)
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -440,14 +491,18 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Build các nút preset thời gian nhanh
   Widget _buildPresetButtons() {
+    // Danh sách preset khác nhau cho chế độ làm việc và nghỉ
     final presets = _isWorkMode
         ? [
+            // Chế độ làm việc: 25, 45, 90 phút
             {'label': '25m', 'minutes': 25, 'icon': Icons.bolt},
             {'label': '45m', 'minutes': 45, 'icon': Icons.wb_sunny},
             {'label': '90m', 'minutes': 90, 'icon': Icons.rocket_launch},
           ]
         : [
+            // Chế độ nghỉ: 5, 15 phút
             {'label': '5m', 'minutes': 5, 'icon': Icons.coffee},
             {'label': '15m', 'minutes': 15, 'icon': Icons.local_cafe},
           ];
@@ -538,9 +593,11 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Build phần hiển thị đồng hồ (countdown hoặc wheel picker)
   Widget _buildClockDisplay() {
     // Hiển thị countdown nếu đang chạy HOẶC đã pause (còn thời gian)
     if (_isRunning || _remainingSeconds > 0) {
+      // Tính giờ:phút:giây từ tổng số giây còn lại
       int totalSeconds = _remainingSeconds;
       int hours = totalSeconds ~/ 3600;
       int minutes = (totalSeconds % 3600) ~/ 60;
