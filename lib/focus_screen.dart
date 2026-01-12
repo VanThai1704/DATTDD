@@ -30,11 +30,29 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
   bool _isDeepFocus = false;
 
   String _selectedAlarm = 'Default';
-  final List<String> _alarms = ['Default', 'Piano', 'Zen', 'Nature'];
+  final List<String> _alarms = [
+    'Default',
+    'Piano',
+    'Zen',
+    'Nature',
+    'Chimes',
+    'Bell',
+  ];
+  final List<String> _whitenoise = [
+    'None',
+    'Rain',
+    'Ocean',
+    'Forest',
+    'Fireplace',
+    'Cafe',
+  ];
+  String _selectedWhiteNoise = 'None';
 
   int _totalFocusMinutes = 0;
   int _currentStreak = 0;
   Task? _selectedTask;
+  Project? _selectedProject;
+  List<Project> _projects = [];
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FlutterLocalNotificationsPlugin _notifications =
@@ -62,6 +80,18 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
 
   Future<void> _loadData() async {
     await _loadTodayStats();
+    await _loadProjects();
+  }
+
+  Future<void> _loadProjects() async {
+    final snapshot = await _firestore.collection('projects').get();
+    if (mounted) {
+      setState(() {
+        _projects = snapshot.docs
+            .map((doc) => Project.fromFirestore(doc.data(), doc.id))
+            .toList();
+      });
+    }
   }
 
   Future<void> _loadTodayStats() async {
@@ -198,6 +228,11 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
       'date': DateFormat('yyyy-MM-dd').format(now),
       'taskId': _selectedTask?.id,
       'taskTitle': _selectedTask?.title,
+      'projectId': _selectedProject?.id,
+      'projectName': _selectedProject?.name,
+      'alarmSound': _selectedAlarm,
+      'whiteNoise': _selectedWhiteNoise,
+      'deepFocus': _isDeepFocus,
     });
     _loadTodayStats();
   }
@@ -259,6 +294,49 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     _timer = null;
     setState(() => _isRunning = false);
     _audioPlayer.stop();
+    _showPauseReasonDialog();
+  }
+
+  void _showPauseReasonDialog() {
+    final reasons = [
+      'Cần giải lao',
+      'Bị gián đoạn',
+      'Cần uống nước',
+      'Mệt mỏi',
+      'Khác',
+    ];
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'LÝ DO TẠM DỪNG?',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            letterSpacing: 2,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: reasons
+              .map(
+                (reason) => ListTile(
+                  title: Text(
+                    reason,
+                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                  onTap: () {
+                    debugPrint('Paused: $reason');
+                    Navigator.pop(context);
+                  },
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
   }
 
   void _resetTimer() {
@@ -323,9 +401,13 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
                     const SizedBox(height: 20),
                     _buildStreakCounter(),
                     const SizedBox(height: 30),
+                    if (!_isRunning) _buildPresetButtons(),
+                    const SizedBox(height: 20),
                     _buildClockDisplay(),
                     const SizedBox(height: 30),
                     _buildAlarmSelector(),
+                    const SizedBox(height: 20),
+                    _buildProjectSelector(),
                     const SizedBox(height: 20),
                     _buildDeepFocusToggle(),
                     const SizedBox(height: 20),
@@ -358,6 +440,82 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildPresetButtons() {
+    final presets = _isWorkMode
+        ? [
+            {'label': '25m', 'minutes': 25, 'icon': Icons.bolt},
+            {'label': '45m', 'minutes': 45, 'icon': Icons.wb_sunny},
+            {'label': '90m', 'minutes': 90, 'icon': Icons.rocket_launch},
+          ]
+        : [
+            {'label': '5m', 'minutes': 5, 'icon': Icons.coffee},
+            {'label': '15m', 'minutes': 15, 'icon': Icons.local_cafe},
+          ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Column(
+        children: [
+          Text(
+            _isWorkMode ? 'PRESETS' : 'BREAK PRESETS',
+            style: const TextStyle(
+              color: Colors.white24,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 2,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: presets.map((preset) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white.withOpacity(0.05),
+                    foregroundColor: Colors.blueAccent,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      side: BorderSide(
+                        color: Colors.blueAccent.withOpacity(0.3),
+                      ),
+                    ),
+                  ),
+                  icon: Icon(preset['icon'] as IconData, size: 16),
+                  label: Text(
+                    preset['label'] as String,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  onPressed: () {
+                    final minutes = preset['minutes'] as int;
+                    setState(() {
+                      if (_isWorkMode) {
+                        _workHours = minutes ~/ 60;
+                        _workMinutes = minutes % 60;
+                        _hourController.jumpToItem(_workHours);
+                        _minController.jumpToItem(_workMinutes);
+                      }
+                      _remainingSeconds = minutes * 60;
+                    });
+                    HapticFeedback.mediumImpact();
+                  },
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStreakCounter() {
     return Column(
       children: [
@@ -381,7 +539,8 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildClockDisplay() {
-    if (_isRunning) {
+    // Hiển thị countdown nếu đang chạy HOẶC đã pause (còn thời gian)
+    if (_isRunning || _remainingSeconds > 0) {
       int totalSeconds = _remainingSeconds;
       int hours = totalSeconds ~/ 3600;
       int minutes = (totalSeconds % 3600) ~/ 60;
@@ -404,6 +563,7 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
         ],
       );
     } else {
+      // Chỉ hiển thị wheel picker khi chưa set thời gian
       return Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -503,11 +663,82 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
   Widget _buildAlarmSelector() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 40),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'ALARM SOUND',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+              DropdownButton<String>(
+                value: _selectedAlarm,
+                dropdownColor: const Color(0xFF1A1A1A),
+                underline: const SizedBox(),
+                style: const TextStyle(
+                  color: Colors.blueAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+                items: _alarms.map((String value) {
+                  return DropdownMenuItem<String>(
+                      value: value, child: Text(value));
+                }).toList(),
+                onChanged: (v) => setState(() => _selectedAlarm = v!),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'WHITE NOISE',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+              DropdownButton<String>(
+                value: _selectedWhiteNoise,
+                dropdownColor: const Color(0xFF1A1A1A),
+                underline: const SizedBox(),
+                style: const TextStyle(
+                  color: Colors.tealAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+                items: _whitenoise.map((String value) {
+                  return DropdownMenuItem<String>(
+                      value: value, child: Text(value));
+                }).toList(),
+                onChanged: (v) => setState(() => _selectedWhiteNoise = v!),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProjectSelector() {
+    if (_projects.isEmpty) return const SizedBox();
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'ALARM SOUND',
+            'DỰ ÁN',
             style: TextStyle(
               color: Colors.white38,
               fontSize: 10,
@@ -515,19 +746,43 @@ class _FocusScreenState extends State<FocusScreen> with WidgetsBindingObserver {
               letterSpacing: 1,
             ),
           ),
-          DropdownButton<String>(
-            value: _selectedAlarm,
-            dropdownColor: const Color(0xFF1A1A1A),
-            underline: const SizedBox(),
-            style: const TextStyle(
-              color: Colors.blueAccent,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                ChoiceChip(
+                  label: const Text(
+                    'NONE',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                  selected: _selectedProject == null,
+                  onSelected: (s) => setState(() => _selectedProject = null),
+                  selectedColor: Colors.grey,
+                  backgroundColor: Colors.white.withOpacity(0.05),
+                ),
+                const SizedBox(width: 8),
+                ..._projects.map(
+                  (p) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(
+                        p.name.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      selected: _selectedProject?.id == p.id,
+                      onSelected: (s) =>
+                          setState(() => _selectedProject = s ? p : null),
+                      selectedColor: Color(p.colorValue),
+                      backgroundColor: Colors.white.withOpacity(0.05),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            items: _alarms.map((String value) {
-              return DropdownMenuItem<String>(value: value, child: Text(value));
-            }).toList(),
-            onChanged: (v) => setState(() => _selectedAlarm = v!),
           ),
         ],
       ),

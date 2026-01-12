@@ -63,24 +63,9 @@ class NotificationService {
       return;
     }
 
-    // Test notification - send immediately
-    await _notifications.show(
-      999999,
-      '✅ Test Notification',
-      'Hệ thống thông báo đang hoạt động! Task: ${task.title}',
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'test_channel',
-          'Test Notifications',
-          channelDescription: 'Test notification channel',
-          importance: Importance.max,
-          priority: Priority.high,
-          playSound: true,
-          enableVibration: true,
-        ),
-      ),
-    );
-    print('   ✅ Test notification sent immediately');
+    // Determine importance based on priority
+    final importance = _getImportanceFromPriority(task.priority);
+    final priority = _getPriorityFromTaskPriority(task.priority);
 
     // 1. Notify 1 day before
     final oneDayBefore = scheduledDate.subtract(const Duration(days: 1));
@@ -93,15 +78,20 @@ class NotificationService {
         '📅 Nhắc nhở: ${task.title}',
         'Còn 1 ngày nữa là đến hạn.',
         tz.TZDateTime.from(oneDayBefore, tz.local),
-        const NotificationDetails(
+        NotificationDetails(
           android: AndroidNotificationDetails(
             'task_reminders_day',
             'Nhắc nhở 1 ngày trước',
             channelDescription: 'Thông báo nhắc nhở 1 ngày trước khi đến hạn',
-            importance: Importance.high,
-            priority: Priority.high,
+            importance: importance,
+            priority: priority,
             playSound: true,
             enableVibration: true,
+            actions: [
+              AndroidNotificationAction('snooze_5', 'Snooze 5 min'),
+              AndroidNotificationAction('snooze_15', 'Snooze 15 min'),
+              AndroidNotificationAction('done', 'Mark Done'),
+            ],
           ),
         ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
@@ -182,7 +172,7 @@ class NotificationService {
       '🔴 ĐẾN HẠN: ${task.title}',
       task.description.isNotEmpty
           ? task.description
-          : 'Bắt đầu công việc ngay thôi!',
+          : 'Công việc đã đến hạn. Hãy hoàn thành ngay!',
       tz.TZDateTime.from(scheduledDate, tz.local),
       const NotificationDetails(
         android: AndroidNotificationDetails(
@@ -209,5 +199,51 @@ class NotificationService {
     await _notifications.cancel(taskId.hashCode + 1);
     await _notifications.cancel(taskId.hashCode + 2);
     await _notifications.cancel(taskId.hashCode + 3);
+  }
+
+  static Importance _getImportanceFromPriority(TaskPriority priority) {
+    switch (priority) {
+      case TaskPriority.high:
+        return Importance.max;
+      case TaskPriority.medium:
+        return Importance.high;
+      case TaskPriority.low:
+        return Importance.defaultImportance;
+    }
+  }
+
+  static Priority _getPriorityFromTaskPriority(TaskPriority taskPriority) {
+    switch (taskPriority) {
+      case TaskPriority.high:
+        return Priority.max;
+      case TaskPriority.medium:
+        return Priority.high;
+      case TaskPriority.low:
+        return Priority.defaultPriority;
+    }
+  }
+
+  static Future<void> snoozeNotification(String taskId, int minutes) async {
+    await cancelNotification(taskId);
+    final snoozeTime = DateTime.now().add(Duration(minutes: minutes));
+    
+    await _notifications.zonedSchedule(
+      taskId.hashCode + 999,
+      '⏰ Snoozed Reminder',
+      'Time to check your task!',
+      tz.TZDateTime.from(snoozeTime, tz.local),
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'snooze_reminders',
+          'Snoozed Reminders',
+          channelDescription: 'Reminders that were snoozed',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
   }
 }

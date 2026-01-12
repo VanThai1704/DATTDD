@@ -19,9 +19,14 @@ class _StatsScreenState extends State<StatsScreen> {
   int _currentStreak = 0;
   int _coins = 0;
   int _streakFreezes = 0;
+  int _pendingTasksCount = 0;
+  int _overdueTasksCount = 0;
+  double _productivityScore = 0;
+  Map<int, int> _hourlyFocusData = {};
 
   Map<String, int> _weeklyData = {};
   bool _isLoading = true;
+  String _viewMode = 'week'; // 'week', 'month', 'quarter'
 
   @override
   void initState() {
@@ -73,18 +78,43 @@ class _StatsScreenState extends State<StatsScreen> {
       // 3. Tasks Stats
       final taskSnapshot = await _firestore.collection('tasks').get();
       int completed = 0;
+      int pending = 0;
       int overdue = 0;
+      
       for (var doc in taskSnapshot.docs) {
         final data = doc.data();
         final isDone = data['isCompleted'] ?? false;
         final deadline = (data['deadlineDateTime'] as Timestamp).toDate();
-        if (isDone)
+        
+        if (isDone) {
           completed++;
-        else if (deadline.isBefore(now))
+        } else if (deadline.isBefore(now)) {
           overdue++;
+        } else {
+          pending++;
+        }
       }
 
-      // 4. Streak
+      // 4. Hourly focus analysis
+      Map<int, int> hourlyFocus = {};
+      for (var doc in focusSnapshot.docs) {
+        final data = doc.data();
+        final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+        if (createdAt != null) {
+          final hour = createdAt.hour;
+          final duration = data['duration'] as int? ?? 0;
+          hourlyFocus[hour] = (hourlyFocus[hour] ?? 0) + duration;
+        }
+      }
+
+      // 5. Productivity score (0-100)
+      double score = 0;
+      if (completed + pending + overdue > 0) {
+        score = (completed / (completed + pending + overdue)) * 100;
+      }
+      score = (score + (_currentStreak * 2)).clamp(0, 100);
+
+      // 6. Streak
       int streak = 0;
       DateTime checkDate = now;
       if (!activeDays.contains(todayStr))
@@ -98,8 +128,12 @@ class _StatsScreenState extends State<StatsScreen> {
         setState(() {
           _totalFocusMinutes = totalMinutes;
           _completedTasksCount = completed;
+          _pendingTasksCount = pending;
+          _overdueTasksCount = overdue;
           _currentStreak = streak;
           _weeklyData = weekly;
+          _productivityScore = score;
+          _hourlyFocusData = hourlyFocus;
           _isLoading = false;
         });
       }
@@ -160,8 +194,14 @@ class _StatsScreenState extends State<StatsScreen> {
                       children: [
                         _buildCoinWallet(),
                         const SizedBox(height: 24),
+                        _buildProductivityScore(),
+                        const SizedBox(height: 24),
                         _buildInsightCard(),
+                        const SizedBox(height: 24),
+                        _buildTaskPieChart(),
                         const SizedBox(height: 30),
+                        _buildViewModeToggle(),
+                        const SizedBox(height: 16),
                         const Text(
                           'FOCUS ACTIVITY',
                           style: TextStyle(
@@ -173,6 +213,8 @@ class _StatsScreenState extends State<StatsScreen> {
                         ),
                         const SizedBox(height: 16),
                         _buildChart(),
+                        const SizedBox(height: 30),
+                        _buildBestFocusTime(),
                         const SizedBox(height: 30),
                         const Text(
                           'STREAK PROTECTION',
@@ -255,6 +297,284 @@ class _StatsScreenState extends State<StatsScreen> {
               color: Colors.blueAccent,
               fontSize: 10,
               fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProductivityScore() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.purpleAccent.withOpacity(0.2),
+            Colors.blueAccent.withOpacity(0.1),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.purpleAccent.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'PRODUCTIVITY SCORE',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+              Text(
+                '${_productivityScore.toStringAsFixed(0)}/100',
+                style: const TextStyle(
+                  color: Colors.purpleAccent,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: LinearProgressIndicator(
+              value: _productivityScore / 100,
+              minHeight: 8,
+              backgroundColor: Colors.white.withOpacity(0.1),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                _productivityScore > 70
+                    ? Colors.greenAccent
+                    : _productivityScore > 40
+                        ? Colors.orangeAccent
+                        : Colors.redAccent,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _getProductivityMessage(),
+            style: const TextStyle(
+              color: Colors.white38,
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getProductivityMessage() {
+    if (_productivityScore >= 80) return '🔥 Xuất sắc! Bạn đang rất năng suất!';
+    if (_productivityScore >= 60) return '👍 Tốt! Hãy duy trì phong độ!';
+    if (_productivityScore >= 40) return '💪 Ổn! Cố gắng thêm một chút!';
+    return '📈 Hãy bắt đầu với những mục tiêu nhỏ!';
+  }
+
+  Widget _buildTaskPieChart() {
+    final total = _completedTasksCount + _pendingTasksCount + _overdueTasksCount;
+    if (total == 0) return const SizedBox();
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'TASK BREAKDOWN',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 150,
+                  child: PieChart(
+                    PieChartData(
+                      sectionsSpace: 2,
+                      centerSpaceRadius: 40,
+                      sections: [
+                        PieChartSectionData(
+                          value: _completedTasksCount.toDouble(),
+                          color: Colors.greenAccent,
+                          title: '$_completedTasksCount',
+                          radius: 50,
+                          titleStyle: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                          ),
+                        ),
+                        PieChartSectionData(
+                          value: _pendingTasksCount.toDouble(),
+                          color: Colors.blueAccent,
+                          title: '$_pendingTasksCount',
+                          radius: 50,
+                          titleStyle: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                          ),
+                        ),
+                        PieChartSectionData(
+                          value: _overdueTasksCount.toDouble(),
+                          color: Colors.redAccent,
+                          title: '$_overdueTasksCount',
+                          radius: 50,
+                          titleStyle: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 20),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildLegendItem('Hoàn thành', Colors.greenAccent),
+                  const SizedBox(height: 8),
+                  _buildLegendItem('Đang làm', Colors.blueAccent),
+                  const SizedBox(height: 8),
+                  _buildLegendItem('Quá hạn', Colors.redAccent),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegendItem(String label, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 10,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildViewModeToggle() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _buildModeChip('TUẦN', 'week'),
+        const SizedBox(width: 8),
+        _buildModeChip('THÁNG', 'month'),
+        const SizedBox(width: 8),
+        _buildModeChip('QUÝ', 'quarter'),
+      ],
+    );
+  }
+
+  Widget _buildModeChip(String label, String mode) {
+    final isSelected = _viewMode == mode;
+    return ChoiceChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          color: isSelected ? Colors.black : Colors.white70,
+        ),
+      ),
+      selected: isSelected,
+      onSelected: (s) => setState(() => _viewMode = mode),
+      selectedColor: Colors.blueAccent,
+      backgroundColor: Colors.white.withOpacity(0.05),
+    );
+  }
+
+  Widget _buildBestFocusTime() {
+    if (_hourlyFocusData.isEmpty) return const SizedBox();
+
+    var sortedHours = _hourlyFocusData.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final bestHour = sortedHours.first.key;
+    final bestMinutes = sortedHours.first.value;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.orangeAccent.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.wb_sunny,
+            color: Colors.orangeAccent,
+            size: 40,
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'BEST FOCUS TIME',
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${bestHour.toString().padLeft(2, '0')}:00 - ${(bestHour + 1).toString().padLeft(2, '0')}:00',
+                  style: const TextStyle(
+                    color: Colors.orangeAccent,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  '$bestMinutes phút tập trung',
+                  style: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 10,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

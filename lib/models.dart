@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 enum TaskPriority { low, medium, high }
 
+enum RecurringType { none, daily, weekly, monthly }
+
 class ChecklistItem {
   String title;
   bool isDone;
@@ -72,6 +74,8 @@ class Task {
   final TaskPriority priority;
   final String? projectId;
   final List<ChecklistItem> checklist;
+  final RecurringType recurring;
+  final List<String> tags;
 
   Task({
     this.id,
@@ -84,6 +88,8 @@ class Task {
     this.priority = TaskPriority.medium,
     this.projectId,
     this.checklist = const [],
+    this.recurring = RecurringType.none,
+    this.tags = const [],
   });
 
   Map<String, dynamic> toJson() => {
@@ -98,6 +104,8 @@ class Task {
     'priority': priority.index,
     'projectId': projectId,
     'checklist': checklist.map((e) => e.toJson()).toList(),
+    'recurring': recurring.index,
+    'tags': tags,
   };
 
   factory Task.fromFirestore(Map<String, dynamic> data, String id) => Task(
@@ -113,6 +121,8 @@ class Task {
     checklist: (data['checklist'] as List? ?? [])
         .map((e) => ChecklistItem.fromJson(e))
         .toList(),
+    recurring: RecurringType.values[data['recurring'] ?? 0],
+    tags: List<String>.from(data['tags'] ?? []),
   );
 
   Task copyWith({
@@ -120,18 +130,21 @@ class Task {
     bool? isCompleted,
     DateTime? completedAt,
     List<ChecklistItem>? checklist,
+    DateTime? deadlineDateTime,
   }) {
     return Task(
       id: id ?? this.id,
       title: title,
       description: description,
-      deadlineDateTime: deadlineDateTime,
+      deadlineDateTime: deadlineDateTime ?? this.deadlineDateTime,
       durationMinutes: durationMinutes,
       isCompleted: isCompleted ?? this.isCompleted,
       completedAt: completedAt ?? this.completedAt,
       priority: priority,
       projectId: projectId,
       checklist: checklist ?? this.checklist,
+      recurring: recurring,
+      tags: tags,
     );
   }
 }

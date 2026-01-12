@@ -18,8 +18,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   DateTime? _selectedDay;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   StreamSubscription<QuerySnapshot>? _tasksSubscription;
+  StreamSubscription<QuerySnapshot>? _projectsSubscription;
   List<Task> _allTasks = [];
+  List<Project> _projects = [];
   bool _isLoading = true;
+  bool _colorByProject = false;
 
   @override
   void initState() {
@@ -31,6 +34,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void dispose() {
     _tasksSubscription?.cancel();
+    _projectsSubscription?.cancel();
     super.dispose();
   }
 
@@ -45,6 +49,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         setState(() {
           _allTasks = tasks;
           _isLoading = false;
+        });
+      }
+    });
+    
+    _projectsSubscription = _firestore.collection('projects').snapshots().listen((
+      snapshot,
+    ) {
+      final projects = snapshot.docs
+          .map((doc) => Project.fromFirestore(doc.data(), doc.id))
+          .toList();
+      if (mounted) {
+        setState(() {
+          _projects = projects;
         });
       }
     });
@@ -78,6 +95,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           ),
         ),
         actions: [
+          IconButton(
+            icon: Icon(
+              _colorByProject ? Icons.folder : Icons.priority_high,
+              color: Colors.white70,
+            ),
+            tooltip: _colorByProject ? 'Color by Priority' : 'Color by Project',
+            onPressed: () => setState(() => _colorByProject = !_colorByProject),
+          ),
           IconButton(
             icon: Icon(
               _calendarFormat == CalendarFormat.month
@@ -216,74 +241,170 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 20),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: task.isCompleted
-                    ? Colors.blueAccent.withOpacity(0.05)
-                    : const Color(0xFF1A1A1A),
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(
-                  color: isOverdue
-                      ? Colors.redAccent.withOpacity(0.3)
-                      : Colors.white.withOpacity(0.05),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    task.title,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      decoration: task.isCompleted
-                          ? TextDecoration.lineThrough
-                          : null,
-                    ),
+            child: GestureDetector(
+              onLongPress: () => _showQuickEditDialog(task),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 20),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: task.isCompleted
+                      ? Colors.blueAccent.withOpacity(0.05)
+                      : const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(
+                    color: _getTaskColor(task).withOpacity(0.3),
+                    width: 2,
                   ),
-                  if (task.description.isNotEmpty) ...[
-                    const SizedBox(height: 4),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      task.description,
-                      style: const TextStyle(
-                        color: Colors.white38,
-                        fontSize: 12,
+                      task.title,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        decoration: task.isCompleted
+                            ? TextDecoration.lineThrough
+                            : null,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (task.description.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        task.description,
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    const Spacer(),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.timer_outlined,
+                          size: 12,
+                          color: Colors.blueAccent.withOpacity(0.5),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${task.durationMinutes}m',
+                          style: TextStyle(color: Colors.white24, fontSize: 10),
+                        ),
+                        const Spacer(),
+                        if (isOverdue)
+                          const Icon(
+                            Icons.error_outline,
+                            size: 14,
+                            color: Colors.redAccent,
+                          ),
+                      ],
                     ),
                   ],
-                  const Spacer(),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.timer_outlined,
-                        size: 12,
-                        color: Colors.blueAccent.withOpacity(0.5),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${task.durationMinutes}m',
-                        style: TextStyle(color: Colors.white24, fontSize: 10),
-                      ),
-                      const Spacer(),
-                      if (isOverdue)
-                        const Icon(
-                          Icons.error_outline,
-                          size: 14,
-                          color: Colors.redAccent,
-                        ),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
           ),
         ],
       ),
     ).animate().fadeIn(delay: (index * 100).ms).slideX(begin: 0.1, end: 0);
+  }
+
+  Color _getTaskColor(Task task) {
+    if (_colorByProject && task.projectId != null) {
+      final project = _projects.firstWhere(
+        (p) => p.id == task.projectId,
+        orElse: () => Project(name: '', colorValue: Colors.blueAccent.value),
+      );
+      return Color(project.colorValue);
+    }
+    
+    // Color by priority
+    switch (task.priority) {
+      case TaskPriority.high:
+        return Colors.redAccent;
+      case TaskPriority.medium:
+        return Colors.orangeAccent;
+      case TaskPriority.low:
+        return Colors.greenAccent;
+    }
+  }
+
+  Future<void> _showQuickEditDialog(Task task) async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'QUICK ACTIONS',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            letterSpacing: 2,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                task.isCompleted ? Icons.remove_done : Icons.check_circle,
+                color: Colors.greenAccent,
+              ),
+              title: Text(
+                task.isCompleted ? 'Mark as Incomplete' : 'Mark as Complete',
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              onTap: () async {
+                await _firestore.collection('tasks').doc(task.id).update({
+                  'isCompleted': !task.isCompleted,
+                  'completedAt': !task.isCompleted
+                      ? FieldValue.serverTimestamp()
+                      : null,
+                });
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.event, color: Colors.blueAccent),
+              title: const Text(
+                'Reschedule to Tomorrow',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              onTap: () async {
+                final tomorrow = DateTime.now().add(const Duration(days: 1));
+                final newDeadline = DateTime(
+                  tomorrow.year,
+                  tomorrow.month,
+                  tomorrow.day,
+                  task.deadlineDateTime.hour,
+                  task.deadlineDateTime.minute,
+                );
+                await _firestore.collection('tasks').doc(task.id).update({
+                  'deadlineDateTime': Timestamp.fromDate(newDeadline),
+                });
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.redAccent),
+              title: const Text(
+                'Delete Task',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              onTap: () async {
+                await _firestore.collection('tasks').doc(task.id).delete();
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildEmptyState() {
