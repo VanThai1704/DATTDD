@@ -475,22 +475,22 @@ git commit -m "feat: description"
 git push origin main
 ```
 
-## 📝 License
+## 📝 Giấy phép
 
-MIT License - Free to use and modify
+Giấy phép MIT - Tự do sử dụng và chỉnh sửa
 
-## 🤝 Contributing
+## 🤝 Đóng góp
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Rất hoan nghênh các đóng góp! Vui lòng thoải mái gửi Pull Request.
 
-## 📧 Contact
+## 📧 Liên hệ
 
 - GitHub: [VanThai1704](https://github.com/VanThai1704)
-- Project: [DATTDD](https://github.com/VanThai1704/DATTDD)
+- Dự án: [DATTDD](https://github.com/VanThai1704/DATTDD)
 
 ---
 
-Made with ❤️ using Flutter
+Được tạo với ❤️ bằng Flutter
 
 ### Notification System
 - `Timer.periodic` để kiểm tra định kỳ mỗi phút
